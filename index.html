@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>FCPS Book</title>
+<meta name="theme-color" content="#FFFFFF">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="FCPS Book">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" href="icons/icon-192.png">
+<link rel="stylesheet" href="fonts.css">
+<link rel="stylesheet" href="styles.css">
+<script>
+  /* Apply the saved theme before first paint to avoid a flash. */
+  try {
+    var s = JSON.parse(localStorage.getItem('fcpsbook.settings.v1') || '{}');
+    if (s.theme) document.documentElement.setAttribute('data-theme', s.theme);
+  } catch (e) {}
+</script>
+</head>
+<body>
+<div class="shell">
+  <header class="topbar">
+    <button class="icon-btn menu-btn" id="menuBtn" aria-label="Open contents" type="button"></button>
+    <a class="brand" href="#/" aria-label="FCPS Book, all systems">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span class="brand-name">FCPS Book</span>
+    </a>
+    <label class="search" for="q">
+      <span class="search-ic" aria-hidden="true"></span>
+      <input id="q" type="search" placeholder="Search questions, answers and topics" autocomplete="off" spellcheck="false">
+      <kbd class="kbd" id="kbdHint">⌘K</kbd>
+    </label>
+    <button class="icon-btn" id="settingsBtn" aria-label="Settings" title="Settings" type="button"></button>
+  </header>
+  <aside class="sidebar" id="sidebar" aria-label="Contents"></aside>
+  <div class="scrim" id="scrim"></div>
+  <main class="main" id="main" tabindex="-1"></main>
+</div>
+<div id="toasts" class="toasts" aria-live="polite"></div>
+<script src="app.js"></script>
+</body>
+</html>
