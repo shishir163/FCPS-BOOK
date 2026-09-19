@@ -212,6 +212,9 @@ svg.ic { display: block; flex: none; }
 .rich table { border-collapse: collapse; margin: .6em 0 1em; max-width: 100%; display: block; overflow-x: auto; }
 .rich th, .rich td { border: 1px solid var(--line); padding: 6px 10px; vertical-align: top; text-align: left; }
 .rich th { background: var(--surface2); }
+.rich td[style*="background-color"], .rich th[style*="background-color"] { color: #1B1B1B; padding: 10px 14px; }
+.rich td[style*="border-left"] { border-radius: 4px; }
+.rich table:has(td[style*="border-left"]) { display: table; width: 100%; }
 .rich code { font-family: ui-monospace, Menlo, monospace; font-size: .9em; background: var(--surface2); padding: 1px 5px; border-radius: 5px; }
 .rich span[style*="background-color"] { color: #1B1B1B; border-radius: 3px; }
 .rich mark, mark { background: #FFE066; color: #1B1B1B; border-radius: 3px; padding: 0 1px; }
@@ -354,8 +357,50 @@ dialog.editor[open] {
 .seg button + button { border-left: 1px solid var(--line); }
 .seg button:hover { background: var(--surface2); }
 
+
+/* ---------- exam sections, flashcards (phase 3) ---------- */
+.tree-home { margin-bottom: 2px; }
+.tree-home .grow-t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tree-home .tcount { margin-left: auto; }
+.tree-sep { height: 1px; background: var(--line); margin: 8px 8px 10px; }
+select.sel { height: 36px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); padding: 0 10px; max-width: 240px; font-weight: 400; }
+.ed-sys { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; font-size: 14px; }
+.btn.big { height: 52px; padding: 0 30px; font-size: 16px; }
+.fc { max-width: 860px; }
+.fc-bar { height: 8px; border-radius: 8px; background: var(--surface2); overflow: hidden; margin: 4px 0 6px; }
+.fc-bar i { display: block; height: 100%; background: var(--accent); border-radius: 8px; }
+.fc-card { border: 1px solid var(--line); border-left: 8px solid var(--c, var(--accent)); border-radius: 20px; background: var(--surface); padding: 26px 30px 30px; min-height: 260px; margin-top: 14px; }
+.fc-path { color: var(--muted); font-size: 13.5px; margin-bottom: 8px; }
+.fc-q { font-size: 26px; line-height: 1.35; letter-spacing: -.01em; white-space: pre-wrap; margin: 6px 0 22px; }
+.fc-a { border-top: 1px solid var(--line); padding-top: 18px; max-height: 58vh; overflow: auto; }
+.fc-rate { display: flex; gap: 12px; margin-top: 16px; }
+.fc-rate .btn { flex: 1; }
+.fc-done { margin-top: 18px; padding: 26px 28px; border-radius: 20px; border: 1px solid var(--line); background: var(--surface); }
+.fc-done h2 { font-size: 24px; margin-bottom: 6px; }
+.fc-done p { color: var(--muted); margin-bottom: 16px; }
+.fc-miss { display: flex; flex-direction: column; gap: 6px; margin-top: 18px; }
+.fc-miss a { padding: 9px 12px; border-radius: 10px; background: var(--surface2); }
+.fc-miss a:hover { text-decoration: underline; }
+
+
+/* ---------- sorting, sidebar finder, import (phase 4) ---------- */
+.sort-row { margin: 0 0 12px; color: var(--muted); font-size: 14px; }
+.sort-row label { display: inline-flex; align-items: center; gap: 10px; }
+.side-tools { display: flex; gap: 6px; padding: 4px 4px 10px; }
+.side-tools input { flex: 1; min-width: 0; height: 34px; border: 1px solid var(--line); border-radius: 9px; background: var(--bg); padding: 0 10px; }
+.side-tools input:focus { outline: 2px solid var(--accent); outline-offset: 0; }
+.side-tools select.sel { max-width: 112px; height: 34px; padding: 0 6px; }
+.imp-list { display: flex; flex-direction: column; gap: 8px; max-height: 44vh; overflow: auto; }
+.imp-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
+.imp-row b { display: block; }
+.imp-row small { color: var(--muted); }
+.imp-row select.sel { max-width: 250px; }
+.imp-sum { margin: 6px 0 14px; padding-left: 20px; color: var(--muted); }
+
 /* ---------- small screens ---------- */
 @media (max-width: 899px) {
+  .fc-q { font-size: 21px; }
+  .fc-card { padding: 20px 18px 22px; }
   .shell { grid-template-columns: 1fr; grid-template-areas: "top" "main"; }
   .menu-btn { display: inline-grid; }
   .brand { min-width: 0; }

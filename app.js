@@ -1,10 +1,10 @@
-/* FCPS Book — Phase 2.1 (tags, revision lists, new system list, dashboard text size, night themes)
+/* FCPS Book — Phase 4.1 (system sorting, sidebar finder, import from Claude-made files, shaded answer boxes)
  * System > Topic > Subtopic > Question & answer. Offline, stored in IndexedDB.
  */
 (() => {
 'use strict';
 
-const APP_VERSION = 'Phase 2.1';
+const APP_VERSION = 'Phase 4.1';
 
 /* ============================== utilities ============================== */
 const $ = (s, r = document) => r.querySelector(s);
@@ -45,7 +45,13 @@ const P = {
   eraser: '<path d="m7 20-4-4 10-10 7 7-6 7z"/><path d="M9 20h11"/>',
   check: '<path d="m5 12 5 5 9-10"/>',
   tag: '<path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="8.5" r="1.3" fill="currentColor"/>',
-  flag: '<path d="M5 21V4M5 4h11l-2 4 2 4H5"/>'
+  flag: '<path d="M5 21V4M5 4h11l-2 4 2 4H5"/>',
+  cards: '<rect x="3" y="8" width="14" height="12" rx="2"/><path d="M7 8V6a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"/>',
+  chat: '<path d="M4 5h16v11H9l-5 4z"/><path d="M8 9h8M8 12h5"/>',
+  clip: '<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4h6v3H9zM8.5 12h7M8.5 16h7"/>',
+  caseb: '<rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V4h6v3M3 13h18"/>',
+  file: '<path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 13h7M9 17h7"/>',
+  shuffle: '<path d="M4 7h4l8 10h4M4 17h4l3-4M13 11l3-4h4M18 5l2 2-2 2M18 15l2 2-2 2"/>'
 };
 const ic = (n, s = 18) => `<svg class="ic" width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[n] || P.dot}</svg>`;
 
@@ -76,7 +82,7 @@ const THEMES = [
 ];
 
 const SKEY = 'fcpsbook.settings.v1';
-const DEF = { theme: 'light', uiFont: 'lato', noteFont: 'lato', noteSize: 17, seeded: false, lastBackup: 0, lastNode: null, expanded: [], persistAsked: false, customTags: [], dashSize: 17, sysListV: 0 };
+const DEF = { theme: 'light', uiFont: 'lato', noteFont: 'lato', noteSize: 17, seeded: false, lastBackup: 0, lastNode: null, expanded: [], persistAsked: false, customTags: [], dashSize: 17, sysListV: 0, fcShuffle: true, sysSort: 'custom', sysSeen: {} };
 let ST = { ...DEF };
 try { ST = { ...DEF, ...JSON.parse(localStorage.getItem(SKEY) || '{}') }; } catch (e) {}
 const saveST = () => { try { localStorage.setItem(SKEY, JSON.stringify(ST)); } catch (e) {} };
@@ -94,12 +100,12 @@ function applyLook() {
 
 /* ============================== storage ============================== */
 const DB_NAME = 'fcps-book';
-const STORES = ['systems', 'nodes', 'qas'];
+const STORES = ['systems', 'nodes', 'qas', 'exams'];
 let db = null;
 
 function openDB() {
   return new Promise((res, rej) => {
-    const r = indexedDB.open(DB_NAME, 1);
+    const r = indexedDB.open(DB_NAME, 2);
     r.onupgradeneeded = () => { STORES.forEach(s => { if (!r.result.objectStoreNames.contains(s)) r.result.createObjectStore(s, { keyPath: 'id' }); }); };
     r.onsuccess = () => res(r.result);
     r.onerror = () => rej(r.error);
@@ -141,17 +147,22 @@ async function save(put, del) {
 }
 
 /* ============================== state ============================== */
-const S = { systems: [], nodes: [], qas: [] };
-const IX = { sys: new Map(), node: new Map(), topics: new Map(), subs: new Map(), qaOf: new Map(), sysQ: new Map(), text: new Map() };
+const S = { systems: [], nodes: [], qas: [], exams: [] };
+const IX = { sys: new Map(), node: new Map(), topics: new Map(), subs: new Map(), qaOf: new Map(), sysQ: new Map(), text: new Map(), exam: new Map() };
 
 function reindex() {
   S.systems.sort(byOrder); S.nodes.sort(byOrder); S.qas.sort(byOrder);
   IX.sys = new Map(S.systems.map(s => [s.id, s]));
   IX.node = new Map(S.nodes.map(n => [n.id, n]));
-  IX.topics = new Map(); IX.subs = new Map(); IX.qaOf = new Map(); IX.sysQ = new Map();
+  S.exams.sort(byOrder);
+  IX.topics = new Map(); IX.subs = new Map(); IX.qaOf = new Map(); IX.sysQ = new Map(); IX.exam = new Map();
+  for (const e of S.exams) push(IX.exam, e.kind, e);
   for (const n of S.nodes) { if (n.parentId) push(IX.subs, n.parentId, n); else push(IX.topics, n.systemId, n); }
   for (const q of S.qas) { push(IX.qaOf, q.nodeId, q); IX.sysQ.set(q.systemId, (IX.sysQ.get(q.systemId) || 0) + 1); }
 }
+const examsOf = k => IX.exam.get(k) || [];
+const findItem = id => S.qas.find(x => x.id === id) || S.exams.find(x => x.id === id);
+const storeOf = it => (it.kind ? 'exams' : 'qas');
 const topicsOf = sid => IX.topics.get(sid) || [];
 const subsOf = tid => IX.subs.get(tid) || [];
 const qasOf = nid => IX.qaOf.get(nid) || [];
@@ -167,6 +178,16 @@ function qText(q) {
   const names = (q.rev || []).map(revById).concat((q.tags || []).map(tagById)).filter(Boolean).map(x => x.name).join(' ');
   const rec = { u: q.updatedAt, t, l: (q.q + ' ' + t + ' ' + names).toLowerCase(), ql: q.q.toLowerCase() };
   IX.text.set(q.id, rec);
+  return rec;
+}
+
+function eText(e) {
+  const c = IX.text.get(e.id);
+  if (c && c.u === e.updatedAt) return c;
+  const t = stripHtml(e.body), ek = examById(e.kind), sys = e.systemId && IX.sys.get(e.systemId);
+  const names = (e.rev || []).map(revById).concat((e.tags || []).map(tagById)).filter(Boolean).map(x => x.name).join(' ');
+  const rec = { u: e.updatedAt, t, l: (e.title + ' ' + t + ' ' + names + ' ' + (ek ? ek.name : '') + ' ' + (sys ? sys.name : '')).toLowerCase(), ql: e.title.toLowerCase() };
+  IX.text.set(e.id, rec);
   return rec;
 }
 
@@ -195,6 +216,19 @@ const revById = id => REVS.find(r => r.id === id);
 const ptag = (label, color, icon) => `<span class="ptag" style="--t:${color}">${icon ? ic(icon, 12) : ''}${esc(label)}</span>`;
 const qaPills = q => (q.rev || []).map(revById).filter(Boolean).map(r => ptag(r.short, r.color, 'flag')).join('') +
   (q.tags || []).map(tagById).filter(Boolean).map(t => ptag(t.name, t.color)).join('');
+
+const EXAMS = [
+  { id: 'viva', name: 'Viva', plural: 'Viva', color: '#3B6FE0', icon: 'chat', one: 'entry', many: 'entries', add: 'New viva' },
+  { id: 'ospe', name: 'OSPE', plural: 'OSPE', color: '#2FA36B', icon: 'clip', one: 'entry', many: 'entries', add: 'New OSPE' },
+  { id: 'long', name: 'Long case', plural: 'Long cases', color: '#E0489F', icon: 'caseb', one: 'case', many: 'cases', add: 'New long case' },
+  { id: 'short', name: 'Short case', plural: 'Short cases', color: '#F08A24', icon: 'file', one: 'case', many: 'cases', add: 'New short case' }
+];
+const examById = id => EXAMS.find(x => x.id === id);
+const examCount = (n, ek) => `${n} ${n === 1 ? ek.one : ek.many}`;
+const CASE_TEMPLATES = {
+  long: '<h3>Patient summary</h3><p><br></p><h3>Problem list</h3><p><br></p><h3>Preoperative assessment and investigations</h3><p><br></p><h3>Optimisation and risk</h3><p><br></p><h3>Anaesthetic plan</h3><p><br></p><h3>Intraoperative management</h3><p><br></p><h3>Postoperative care</h3><p><br></p><h3>Likely examiner questions</h3><p><br></p>',
+  short: '<h3>Summary</h3><p><br></p><h3>Key issues</h3><p><br></p><h3>Plan</h3><p><br></p><h3>Likely examiner questions</h3><p><br></p>'
+};
 
 const SEED = [
   ['Neuro Anaesthesia', '🧠'], ['Obstetric & Gynae Anaesthesia', '🤰'], ['Cardiothoracic Anaesthesia', '🫀'],
@@ -354,7 +388,12 @@ function walk(root, paste) {
       case 'THEAD': case 'TBODY': case 'TFOOT': case 'TR': out += `<${tag.toLowerCase()}>${inner}</${tag.toLowerCase()}>`; return;
       case 'TH': case 'TD': {
         const cs = parseInt(n.getAttribute('colspan'), 10), rs = parseInt(n.getAttribute('rowspan'), 10);
-        const at = (cs > 1 ? ` colspan="${cs}"` : '') + (rs > 1 ? ` rowspan="${rs}"` : '');
+        let cst = '';   /* shaded boxes: keep the background and the coloured left bar */
+        const cb = st.backgroundColor, cpb = parseColor(cb);
+        if (cpb && SAFE_COLOR.test(cb) && cpb[3] > 0.05 && !(paste && lum(cpb) > 245)) cst += `background-color:${cb};`;
+        const bl = st.borderLeftColor, bpc = parseColor(bl);
+        if (!paste && st.borderLeftStyle === 'solid' && bpc && SAFE_COLOR.test(bl) && parseFloat(st.borderLeftWidth) >= 3) cst += `border-left:5px solid ${bl};`;
+        const at = (cs > 1 ? ` colspan="${cs}"` : '') + (rs > 1 ? ` rowspan="${rs}"` : '') + (cst ? ` style="${esc(cst)}"` : '');
         out += `<${tag.toLowerCase()}${at}>${inner}</${tag.toLowerCase()}>`; return;
       }
       default: out += inner;
@@ -529,15 +568,32 @@ async function deleteSystem(id) {
   const ok = await confirmDlg(`Delete ${s.name}?`, `This removes the system, its ${plural(nodes.length, 'topic/subtopic')} and ${plural(qas.length, 'question')}. You can undo right after.`);
   if (!ok) return;
   S.systems = S.systems.filter(x => x.id !== id); S.nodes = S.nodes.filter(n => n.systemId !== id); S.qas = S.qas.filter(q => q.systemId !== id);
-  await save({}, { systems: [id], nodes: nodes.map(n => n.id), qas: qas.map(q => q.id) });
+  const linked = S.exams.filter(e => e.systemId === id); linked.forEach(e => { e.systemId = null; });
+  await save({ exams: linked }, { systems: [id], nodes: nodes.map(n => n.id), qas: qas.map(q => q.id) });
   reindex();
   const r = parseRoute(); if ((r.v === 'system' && r.id === id) || r.v === 'node') location.hash = '#/'; else render();
-  toast(`Deleted ${s.name}`, { undo: () => restore({ systems: [s], nodes, qas }) });
+  toast(`Deleted ${s.name}`, { undo: () => restore({ systems: [s], nodes, qas, relink: linked, sid: id }) });
 }
 async function restore(data) {
-  S.systems.push(...(data.systems || [])); S.nodes.push(...(data.nodes || [])); S.qas.push(...(data.qas || []));
-  await save({ systems: data.systems || [], nodes: data.nodes || [], qas: data.qas || [] });
+  S.systems.push(...(data.systems || [])); S.nodes.push(...(data.nodes || [])); S.qas.push(...(data.qas || [])); S.exams.push(...(data.exams || []));
+  (data.relink || []).forEach(e => { e.systemId = data.sid; });
+  await save({ systems: data.systems || [], nodes: data.nodes || [], qas: data.qas || [], exams: (data.exams || []).concat(data.relink || []) });
   reindex(); render(true); toast('Restored');
+}
+
+async function moveEntry(id) {
+  const e = S.exams.find(x => x.id === id); if (!e) return;
+  const k = await openDialog({ title: 'Move to another section', primary: 'Move',
+    html: `<label class="fld">Section<select name="k">${EXAMS.map(x => `<option value="${x.id}" ${x.id === e.kind ? 'selected' : ''}>${esc(x.plural)}</option>`).join('')}</select></label>`,
+    collect: d => $('[name=k]', d).value });
+  if (!k || k === e.kind) return;
+  const sibs = examsOf(k); e.kind = k; e.updatedAt = Date.now(); e.order = sibs.length ? Math.max(...sibs.map(x => x.order)) + 1 : 0;
+  await save({ exams: [e] }); reindex(); render(true); toast('Moved');
+}
+async function deleteEntry(id) {
+  const e = S.exams.find(x => x.id === id); if (!e) return;
+  S.exams = S.exams.filter(x => x.id !== id); await save({}, { exams: [id] }); reindex(); render(true);
+  toast('Deleted', { undo: () => restore({ exams: [e] }) });
 }
 
 async function addNode(systemId, parentId) {
@@ -587,6 +643,8 @@ function parseRoute() {
   if (p[0] === 'n' && p[1]) return { v: 'node', id: p[1], qa: p[2] };
   if (p[0] === 'search') return { v: 'search', q: decodeURIComponent(p.slice(1).join('/')) };
   if (p[0] === 'study') return { v: 'study', key: p[1] };
+  if (p[0] === 'exam' && p[1]) return { v: 'exam', kind: p[1], id: p[2] };
+  if (p[0] === 'cards') return { v: 'cards', scope: p[1] || 'all', id: p[2] };
   return { v: 'home' };
 }
 function ensureExpanded(r) {
@@ -601,12 +659,32 @@ function goSearch(q) {
   if (parseRoute().v === 'search') { history.replaceState(null, '', h); render(); } else location.hash = h;
 }
 
+/* ============================== system sorting ============================== */
+const SORTS = [{ id: 'custom', name: 'My order' }, { id: 'az', name: 'A to Z' }, { id: 'most', name: 'Most questions' }, { id: 'recent', name: 'Recently opened' }];
+const isCustom = () => (ST.sysSort || 'custom') === 'custom';
+let sideFilter = '';
+function sortedSystems() {
+  const a = S.systems.slice(), by = ST.sysSort || 'custom';
+  const nm = (x, y) => x.name.localeCompare(y.name, undefined, { sensitivity: 'base', numeric: true });
+  if (by === 'az') a.sort(nm);
+  else if (by === 'most') a.sort((x, y) => (IX.sysQ.get(y.id) || 0) - (IX.sysQ.get(x.id) || 0) || nm(x, y));
+  else if (by === 'recent') { const seen = ST.sysSeen || {}; a.sort((x, y) => (seen[y.id] || 0) - (seen[x.id] || 0) || (x.order - y.order)); }
+  return a;
+}
+const sortSelect = id => `<select id="${id}" class="sel" aria-label="Sort systems">${SORTS.map(o => `<option value="${o.id}" ${(ST.sysSort || 'custom') === o.id ? 'selected' : ''}>${o.name}</option>`).join('')}</select>`;
+function markSeen(r) {
+  let sid = null;
+  if (r.v === 'system') sid = r.id; else if (r.v === 'node') { const n = IX.node.get(r.id); sid = n && n.systemId; }
+  if (sid && IX.sys.has(sid)) { ST.sysSeen = ST.sysSeen || {}; ST.sysSeen[sid] = Date.now(); saveST(); }
+}
+function setSort(v) { ST.sysSort = v; saveST(); render(true); }
+
 /* ============================== views ============================== */
 const sep = '<span class="sep" aria-hidden="true">›</span>';
 const counts = (a, b) => `<div class="counts"><span><b>${a[0]}</b> ${a[0] === 1 ? a[1] : a[1] + 's'}</span>${b ? `<span><b>${b[0]}</b> ${b[0] === 1 ? b[1] : b[1] + 's'}</span>` : ''}</div>`;
 
 function sysCard(s) {
-  return `<article class="card sys" draggable="true" tabindex="0" role="link" data-id="${s.id}" style="--c:${s.color}" aria-label="${esc(s.name)}">
+  return `<article class="card sys" ${isCustom() ? 'draggable="true"' : ''} tabindex="0" role="link" data-id="${s.id}" style="--c:${s.color}" aria-label="${esc(s.name)}">
     <div class="badge" aria-hidden="true">${esc(s.emoji)}</div>
     <div><h3>${esc(s.name)}</h3>${counts([topicsOf(s.id).length, 'topic'], [IX.sysQ.get(s.id) || 0, 'question'])}</div>
     <button class="icon-btn more" data-act="sys-menu" data-id="${s.id}" aria-label="Options for ${esc(s.name)}">${ic('dots')}</button>
@@ -625,15 +703,18 @@ function viewHome() {
       <div><h1>FCPS Book</h1><p class="tally">${plural(S.systems.length, 'system')}, ${plural(nT, 'topic')}, ${plural(nQ, 'question')}</p></div>
       <div class="head-actions">
         ${last ? `<a class="btn resume" href="#/n/${last.id}">${ic('book', 16)}<span class="t">Continue: ${esc(last.name)}</span></a>` : ''}
+        <a class="btn" href="#/cards/all">${ic('cards', 16)} Flashcards</a>
+        <button class="btn" data-act="import-file">${ic('upload', 16)} Import</button>
         <span class="seg" role="group" aria-label="Dashboard text size"><button type="button" data-act="dash-down" aria-label="Smaller dashboard text" title="Smaller dashboard text">A−</button><button type="button" data-act="dash-up" aria-label="Larger dashboard text" title="Larger dashboard text">A+</button></span>
         <button class="btn primary" data-act="add-system">${ic('plus', 16)} Add system</button>
       </div>
     </div>
     ${banner}
-    ${S.systems.length ? studyRow() : ''}
-    ${S.systems.length ? `<div class="grid" id="grid">${S.systems.map(sysCard).join('')}
+    ${S.systems.length ? studyRow() + examRow() : ''}
+    ${S.systems.length ? `<div class="sort-row"><label>Sort systems ${sortSelect('sysSort')}</label></div>
+      <div class="grid" id="grid">${sortedSystems().map(sysCard).join('')}
       <button class="card add" data-act="add-system">${ic('plus', 18)} Add system</button></div>
-      <p class="hint">Drag a card to reorder, or use the ⋮ menu on any card.</p>`
+      <p class="hint">${isCustom() ? 'Drag a card to reorder, or use the ⋮ menu on any card.' : 'Cards are sorted automatically. Choose “My order” to drag them into your own order.'}</p>`
       : `<div class="empty"><p>No systems yet. Add your first one to start building the book.</p><button class="btn primary" data-act="add-system">${ic('plus', 16)} Add system</button></div>`}
   </section>`;
 }
@@ -646,6 +727,7 @@ function viewSystem(s) {
       <div class="badge lg" aria-hidden="true">${esc(s.emoji)}</div>
       <div class="grow"><h1>${esc(s.name)}</h1>${counts([tops.length, 'topic'], [IX.sysQ.get(s.id) || 0, 'question'])}</div>
       <div class="actions">
+        ${(IX.sysQ.get(s.id) || 0) ? `<a class="btn" href="#/cards/sys/${s.id}">${ic('cards', 16)} Flashcards</a>` : ''}
         <button class="btn primary" data-act="add-topic" data-id="${s.id}">${ic('plus', 16)} Add topic</button>
         <button class="icon-btn" data-act="sys-menu" data-id="${s.id}" aria-label="System options">${ic('dots')}</button>
       </div>
@@ -697,6 +779,7 @@ function viewNode(n) {
       <div class="grow"><div class="bar-accent"></div><h1>${esc(n.name)}</h1>
         <p class="sub">${plural(qs.length, 'question')}${!parent && subs.length ? ` here, ${qCountNode(n.id)} including subtopics` : ''}</p></div>
       <div class="actions">
+        ${qCountNode(n.id) ? `<a class="btn" href="#/cards/node/${n.id}">${ic('cards', 16)} Flashcards</a>` : ''}
         <button class="btn primary" data-act="new-qa" data-id="${n.id}">${ic('plus', 16)} New question</button>
         <button class="icon-btn" data-act="node-menu" data-id="${n.id}" aria-label="Options">${ic('dots')}</button>
       </div>
@@ -720,33 +803,135 @@ function studyRow() {
 }
 function studyCounts() {
   const c = {};
-  S.qas.forEach(q => { (q.rev || []).forEach(k => { c[k] = (c[k] || 0) + 1; }); (q.tags || []).forEach(k => { c[k] = (c[k] || 0) + 1; }); });
+  const add = it => { (it.rev || []).forEach(k => { c[k] = (c[k] || 0) + 1; }); (it.tags || []).forEach(k => { c[k] = (c[k] || 0) + 1; }); };
+  S.qas.forEach(add); S.exams.forEach(add);
   return c;
+}
+function examRow() {
+  return `<div class="study-row" aria-label="Exam sections">${EXAMS.map(x => `<a class="study-card" style="--c:${x.color}" href="#/exam/${x.id}">${ic(x.icon, 20)}<span><b>${esc(x.plural)}</b><small>${examCount(examsOf(x.id).length, x)}</small></span></a>`).join('')}</div>`;
 }
 function viewStudy(key) {
   const isRev = !!revById(key), meta = isRev ? revById(key) : tagById(key);
   const cur = meta ? key : 'night', m = meta || REVS[0], rev = meta ? isRev : true;
   const cnt = studyCounts();
   const chip = (k, label, color, icon) => `<a class="chip${k === cur ? ' on' : ''}" style="--c:${color}" href="#/study/${k}">${icon ? ic(icon, 13) : ''} ${esc(label)} <i>${cnt[k] || 0}</i></a>`;
-  const items = S.qas.filter(q => IX.node.get(q.nodeId) && (rev ? (q.rev || []) : (q.tags || [])).includes(cur));
+  const has = it => (rev ? (it.rev || []) : (it.tags || [])).includes(cur);
+  const items = S.qas.filter(q => IX.node.get(q.nodeId) && has(q));
+  const ents = S.exams.filter(has).sort((a, b) => (EXAMS.findIndex(x => x.id === a.kind) - EXAMS.findIndex(x => x.id === b.kind)) || (a.order - b.order));
   const k4 = q => { const n = IX.node.get(q.nodeId), s = IX.sys.get(q.systemId), top = n.parentId ? IX.node.get(n.parentId) : n; return [s.order, top.order, n.parentId ? n.order : -1, q.order]; };
   items.sort((a, b) => { const x = k4(a), y = k4(b); for (let i = 0; i < 4; i++) if (x[i] !== y[i]) return x[i] - y[i]; return 0; });
-  let list = '', lastSys = null;
-  items.forEach((q, i) => {
+  let list = '', lastSys = null, n = 0;
+  items.forEach(q => {
     if (q.systemId !== lastSys) { const s = IX.sys.get(q.systemId); lastSys = q.systemId; list += `<h2 class="group-title sysgroup" style="--c:${s.color}"><span class="em">${esc(s.emoji)}</span> ${esc(s.name)}</h2>`; }
-    list += qaCard(q, i, { path: true, rev: rev ? cur : '' });
+    list += qaCard(q, n++, { path: true, rev: rev ? cur : '' });
   });
+  if (ents.length) {
+    list += `<h2 class="group-title sysgroup" style="--c:#64748B"><span class="em">${ic('clip', 16)}</span> Exam sections</h2>`;
+    ents.forEach(e => { list += entryCard(e, n++, { path: true, rev: rev ? cur : '' }); });
+  }
+  const total = items.length + ents.length;
   return `<section style="--c:${m.color}">
     <nav class="crumbs" aria-label="Breadcrumb"><a href="#/">All systems</a>${sep}<span>Revision and tags</span></nav>
     <div class="page-head"><div class="grow"><div class="bar-accent"></div><h1>${esc(m.name)}</h1>
-      <p class="sub">${plural(items.length, 'question')}. ${rev ? 'Tap the tick on a question when you have finished revising it, and it leaves this list.' : 'Every question with this tag, grouped by system.'}</p></div></div>
+      <p class="sub">${plural(items.length, 'question')}${ents.length ? ` and ${ents.length} exam ${ents.length === 1 ? 'entry' : 'entries'}` : ''}. ${rev ? 'Tap the tick when you have finished revising an item, and it leaves this list.' : 'Everything with this tag, grouped by system.'}</p></div>
+      <div class="actions">${items.length ? `<a class="btn" href="#/cards/${rev ? 'rev' : 'tag'}/${cur}">${ic('cards', 16)} Flashcards</a>` : ''}</div></div>
     <div class="fld-label">Revision lists</div>
     <div class="chips">${REVS.map(r => chip(r.id, r.short, r.color, 'flag')).join('')}</div>
     <div class="fld-label">Tags</div>
     <div class="chips">${allTags().map(t => chip(t.id, t.name, t.color)).join('')}</div>
-    ${items.length ? `<div class="list-bar"><span></span>${items.length > 1 ? `<span><button class="btn small ghost" data-act="collapse-all">Collapse all</button> <button class="btn small ghost" data-act="expand-all">Expand all</button></span>` : ''}</div>
+    ${total ? `<div class="list-bar"><span></span>${total > 1 ? `<span><button class="btn small ghost" data-act="collapse-all">Collapse all</button> <button class="btn small ghost" data-act="expand-all">Expand all</button></span>` : ''}</div>
       <div class="qa-list">${list}</div>`
-      : `<div class="empty" style="margin-top:22px"><p>${rev ? 'Nothing in this list yet. Open any question and use its tag button to add it here.' : 'No questions have this tag yet. Use the tag button on any question to add it.'}</p></div>`}
+      : `<div class="empty" style="margin-top:22px"><p>${rev ? 'Nothing in this list yet. Open any question or case and use its tag button to add it here.' : 'Nothing has this tag yet. Use the tag button on any question or case to add it.'}</p></div>`}
+  </section>`;
+}
+
+/* ---------- exam sections (Viva, OSPE, Long case, Short case) ---------- */
+let examSys = '';
+function entryCard(e, i, o = {}) {
+  const ek = examById(e.kind), sys = e.systemId && IX.sys.get(e.systemId), closed = collapsed.has(e.id), pills = qaPills(e);
+  const path = o.path ? `<a class="qa-path" href="#/exam/${e.kind}/${e.id}">${esc(ek.name)}${sys ? ' › ' + esc(sys.name) : ''}</a>`
+    : (sys ? `<span class="qa-path">${esc(sys.emoji)} ${esc(sys.name)}</span>` : '');
+  return `<article class="qa${closed ? ' closed' : ''}" id="qa-${e.id}" data-id="${e.id}" style="--c:${ek.color}">
+    <header class="qa-head" data-act="toggle-qa" data-id="${e.id}">
+      <span class="qa-n">${i + 1}</span>
+      <div class="qa-title">${path}<h3>${esc(e.title)}</h3>${pills ? `<div class="ptags">${pills}</div>` : ''}</div>
+      <span class="qa-tools">
+        ${o.rev ? `<button class="icon-btn" data-act="rev-remove" data-id="${e.id}" data-key="${o.rev}" aria-label="Done revising, remove from this list" title="Done revising: remove from this list">${ic('check', 18)}</button>` : ''}
+        <button class="icon-btn" data-act="qa-tags" data-id="${e.id}" aria-label="Tags and revision" title="Tags and revision">${ic('tag', 17)}</button>
+        <button class="icon-btn" data-act="edit-entry" data-id="${e.id}" aria-label="Edit" title="Edit">${ic('edit', 17)}</button>
+        <button class="icon-btn" data-act="entry-menu" data-id="${e.id}" aria-label="More options" title="More">${ic('dots', 17)}</button>
+        <span class="icon-btn chev" aria-hidden="true">${ic('down', 17)}</span>
+      </span>
+    </header>
+    <div class="qa-body rich">${e.body || '<p class="ph">Nothing written yet.</p>'}</div>
+  </article>`;
+}
+function viewExam(kind) {
+  const ek = examById(kind), all = examsOf(kind);
+  const used = [...new Set(all.map(e => e.systemId).filter(Boolean))].filter(id => IX.sys.has(id));
+  if (!used.includes(examSys)) examSys = '';
+  const list = examSys ? all.filter(e => e.systemId === examSys) : all;
+  return `<section style="--c:${ek.color}">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="#/">All systems</a>${sep}<span>${esc(ek.plural)}</span></nav>
+    <div class="page-head"><div class="grow"><div class="bar-accent"></div><h1>${esc(ek.plural)}</h1><p class="sub">${examCount(all.length, ek)}</p></div>
+      <div class="actions">
+        ${used.length ? `<select id="examSys" class="sel" aria-label="Filter by system"><option value="">All systems</option>${used.map(id => { const s = IX.sys.get(id); return `<option value="${id}" ${id === examSys ? 'selected' : ''}>${esc(s.emoji)} ${esc(s.name)}</option>`; }).join('')}</select>` : ''}
+        <button class="btn primary" data-act="new-entry" data-kind="${kind}">${ic('plus', 16)} ${esc(ek.add)}</button>
+      </div></div>
+    ${list.length ? `<div class="list-bar"><span>${examCount(list.length, ek)}</span>${list.length > 1 ? `<span><button class="btn small ghost" data-act="collapse-all">Collapse all</button> <button class="btn small ghost" data-act="expand-all">Expand all</button></span>` : ''}</div>
+      <div class="qa-list">${list.map((e, i) => entryCard(e, i)).join('')}</div>`
+      : `<div class="empty" style="margin-top:22px"><p>Nothing here yet. Add your first ${esc(ek.name)}.</p><button class="btn primary" data-act="new-entry" data-kind="${kind}">${ic('plus', 16)} ${esc(ek.add)}</button></div>`}
+  </section>`;
+}
+
+/* ---------- flashcards ---------- */
+let FC = null;
+const shuffleArr = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+function fcScope(scope, id) {
+  let qs = S.qas.slice(), title = 'All questions', back = '#/';
+  if (scope === 'node') { const n = IX.node.get(id); if (n) { const ids = new Set([n.id, ...subsOf(n.id).map(x => x.id)]); qs = S.qas.filter(q => ids.has(q.nodeId)); title = n.name; back = '#/n/' + n.id; } }
+  else if (scope === 'sys') { const s = IX.sys.get(id); if (s) { qs = S.qas.filter(q => q.systemId === id); title = s.name; back = '#/s/' + id; } }
+  else if (scope === 'rev') { const r = revById(id); if (r) { qs = S.qas.filter(q => (q.rev || []).includes(id)); title = r.name; back = '#/study/' + id; } }
+  else if (scope === 'tag') { const t = tagById(id); if (t) { qs = S.qas.filter(q => (q.tags || []).includes(id)); title = t.name; back = '#/study/' + id; } }
+  return { qs: qs.filter(q => IX.node.get(q.nodeId) && stripHtml(q.a)), title, back };
+}
+function fcStart(key, ids, title, back) {
+  ids = ids.slice(); if (ST.fcShuffle !== false) shuffleArr(ids);
+  FC = { key, title, back, total: ids.length, queue: ids, known: [], missed: [], flip: false };
+}
+function fcRate(ok) {
+  if (!FC || !FC.flip || !FC.queue.length) return;
+  const id = FC.queue.shift(); (ok ? FC.known : FC.missed).push(id); FC.flip = false; render();
+}
+function viewCards(r) {
+  const key = r.scope + '/' + (r.id || '');
+  if (!FC || FC.key !== key) { const d = fcScope(r.scope, r.id); fcStart(key, d.qs.map(q => q.id), d.title, d.back); }
+  const have = new Set(S.qas.map(q => q.id));
+  FC.queue = FC.queue.filter(id => have.has(id));
+  const done = FC.known.length + FC.missed.length, on = ST.fcShuffle !== false;
+  const head = `<nav class="crumbs" aria-label="Breadcrumb"><a href="#/">All systems</a>${sep}<span>Flashcards</span></nav>
+    <div class="page-head"><div class="grow"><div class="bar-accent"></div><h1>${esc(FC.title)}</h1>
+      <p class="sub">${FC.total ? `${done} of ${FC.total} done. ${FC.known.length} got it, ${FC.missed.length} to review.` : 'No cards here yet.'}</p></div>
+      <div class="actions"><button class="btn small" data-act="fc-shuffle" aria-pressed="${on}">${ic('shuffle', 15)} Shuffle: ${on ? 'on' : 'off'}</button>
+        <button class="btn small" data-act="fc-restart">Restart</button><a class="btn small" href="${FC.back}">Close</a></div></div>`;
+  if (!FC.total) return `<section class="fc">${head}<div class="empty"><p>Only questions that have an answer become flashcards. Add answers, or pick another topic.</p></div></section>`;
+  const bar = `<div class="fc-bar" role="progressbar" aria-valuemin="0" aria-valuemax="${FC.total}" aria-valuenow="${done}"><i style="width:${Math.round(done / FC.total * 100)}%"></i></div>`;
+  if (!FC.queue.length) {
+    const miss = FC.missed.map(id => S.qas.find(q => q.id === id)).filter(Boolean);
+    return `<section class="fc">${head}${bar}<div class="fc-done"><h2>Round complete</h2>
+      <p>${FC.known.length} got it${miss.length ? `, ${miss.length} to review.` : '. Nothing left to review.'}</p>
+      <div class="btn-row">${miss.length ? `<button class="btn primary" data-act="fc-missed">Practise the ${miss.length} missed</button><button class="btn" data-act="fc-mark">${ic('flag', 15)} Add missed to a revision list</button>` : ''}<button class="btn" data-act="fc-restart">Start again</button></div>
+      ${miss.length ? `<div class="fc-miss">${miss.map(q => `<a href="#/n/${q.nodeId}/${q.id}">${esc(q.q)}</a>`).join('')}</div>` : ''}</div></section>`;
+  }
+  const q = S.qas.find(x => x.id === FC.queue[0]), n = IX.node.get(q.nodeId), sys = IX.sys.get(q.systemId), pills = qaPills(q);
+  return `<section class="fc">${head}${bar}
+    <div class="fc-card" style="--c:${sys.color}">
+      <div class="fc-path">${esc(pathOf(n))}</div>${pills ? `<div class="ptags" style="margin:0 0 6px">${pills}</div>` : ''}
+      <h2 class="fc-q">${esc(q.q)}</h2>
+      ${FC.flip ? `<div class="fc-a rich">${q.a}</div>` : `<button class="btn primary big" data-act="fc-flip">Show answer</button>`}
+    </div>
+    ${FC.flip ? `<div class="fc-rate"><button class="btn danger big" data-act="fc-again">Again</button><button class="btn primary big" data-act="fc-know">Got it</button></div>` : ''}
+    <p class="hint">Press Space to show the answer. Then 1 for Again and 2 for Got it, or use the left and right arrow keys.</p>
   </section>`;
 }
 
@@ -768,6 +953,7 @@ function viewSearch(query) {
   for (const q of S.qas) { const t = qText(q); if (all(t.l)) qHits.push([q, t]); }
   qHits.sort((a, b) => (all(b[1].ql) ? 1 : 0) - (all(a[1].ql) ? 1 : 0));
   const shown = qHits.slice(0, 80);
+  const eHits = []; for (const e of S.exams) { const t = eText(e); if (all(t.l)) eHits.push([e, t]); }
   const snip = t => {
     const low = t.t.toLowerCase(), found = terms.map(x => low.indexOf(x)).filter(i => i > -1);
     if (!found.length) return '';
@@ -775,7 +961,7 @@ function viewSearch(query) {
     return (a > 0 ? '…' : '') + t.t.slice(a, b) + (b < t.t.length ? '…' : '');
   };
   let html = `<section><nav class="crumbs"><a href="#/">All systems</a>${sep}<span>Search</span></nav>
-    <div class="page-head"><div class="grow"><h1>Search</h1><p class="sub">${plural(qHits.length, 'question')} and ${plural(sysHits.length + nodeHits.length, 'topic')} matching “${esc(query)}”</p></div></div>`;
+    <div class="page-head"><div class="grow"><h1>Search</h1><p class="sub">${plural(qHits.length, 'question')}, ${plural(sysHits.length + nodeHits.length, 'topic')} and ${eHits.length} exam ${eHits.length === 1 ? 'entry' : 'entries'} matching “${esc(query)}”</p></div></div>`;
   if (sysHits.length || nodeHits.length) {
     html += `<h2 class="group-title">Systems and topics</h2><div class="results">` +
       sysHits.map(s => `<a class="res" style="--c:${s.color}" href="#/s/${s.id}"><div class="rq">${esc(s.emoji)} ${hl(s.name, terms)}</div></a>`).join('') +
@@ -788,27 +974,44 @@ function viewSearch(query) {
       return `<a class="res" style="--c:${IX.sys.get(q.systemId).color}" href="#/n/${n.id}/${q.id}"><div class="path">${esc(pathOf(n))}</div><div class="rq">${hl(q.q, terms)}</div>${sn ? `<div class="snip">${hl(sn, terms)}</div>` : ''}${qaPills(q) ? `<div class="ptags">${qaPills(q)}</div>` : ''}</a>`;
     }).join('') + `</div>` + (qHits.length > shown.length ? `<p class="hint">Showing the first ${shown.length}. Add another word to narrow the search.</p>` : '');
   }
-  if (!qHits.length && !sysHits.length && !nodeHits.length) html += `<div class="empty"><p>Nothing found. Try fewer or different words.</p></div>`;
+  if (eHits.length) {
+    html += `<h2 class="group-title">Exam sections</h2><div class="results">` + eHits.slice(0, 40).map(([e, t]) => {
+      const ek = examById(e.kind), sys = e.systemId && IX.sys.get(e.systemId), sn = snip(t);
+      return `<a class="res" style="--c:${ek.color}" href="#/exam/${e.kind}/${e.id}"><div class="path">${esc(ek.name)}${sys ? ' › ' + esc(sys.name) : ''}</div><div class="rq">${hl(e.title, terms)}</div>${sn ? `<div class="snip">${hl(sn, terms)}</div>` : ''}${qaPills(e) ? `<div class="ptags">${qaPills(e)}</div>` : ''}</a>`;
+    }).join('') + `</div>`;
+  }
+  if (!qHits.length && !sysHits.length && !nodeHits.length && !eHits.length) html += `<div class="empty"><p>Nothing found. Try fewer or different words.</p></div>`;
   return html + '</section>';
 }
 
 /* ============================== sidebar tree ============================== */
+function navExtra(r) {
+  return `<a class="tree-home${r.v === 'cards' ? ' on' : ''}" href="#/cards/all">${ic('cards', 17)} Flashcards</a>` +
+    EXAMS.map(x => `<a class="tree-home${r.v === 'exam' && r.kind === x.id ? ' on' : ''}" style="--c:${x.color}" href="#/exam/${x.id}">${ic(x.icon, 17)} <span class="grow-t">${esc(x.plural)}</span><span class="tcount">${examsOf(x.id).length || ''}</span></a>`).join('') + '<div class="tree-sep"></div>';
+}
 function renderTree() {
-  const sb = $('#sidebar'), keep = sb.scrollTop, r = parseRoute();
-  const curNode = r.v === 'node' ? IX.node.get(r.id) : null;
-  const open = id => ST.expanded.includes(id);
+  const sb = $('#sidebar'), r = parseRoute();
+  if (!$('#treeNav', sb)) {
+    sb.innerHTML = `<div id="treeNav"></div><div class="side-tools"><input id="sideFind" type="search" placeholder="Find a system" autocomplete="off" spellcheck="false" aria-label="Find a system">${sortSelect('sideSort')}</div><div id="treeSys"></div>`;
+  }
+  const keep = sb.scrollTop, curNode = r.v === 'node' ? IX.node.get(r.id) : null;
+  const q = sideFilter.trim().toLowerCase(), open = id => ST.expanded.includes(id);
   const row = (cls, id, href, emoji, name, count, hasKids, on, color) =>
     `<div class="trow ${cls}${on ? ' on' : ''}" ${color ? `style="--c:${color}"` : ''}>
       <button class="caret ${hasKids ? (open(id) ? 'open' : '') : 'none'}" data-act="tog" data-id="${id}" aria-label="${open(id) ? 'Collapse' : 'Expand'}" ${hasKids ? '' : 'tabindex="-1"'}>${ic('right', 15)}</button>
       <a class="tname" href="${href}">${emoji ? `<span class="em">${esc(emoji)}</span>` : ''}<span class="t">${esc(name)}</span></a>
       <span class="tcount">${count || ''}</span></div>`;
-  let h = `<a class="tree-home${r.v === 'home' ? ' on' : ''}" href="#/">${ic('home', 17)} All systems</a>` +
-    `<a class="tree-home${r.v === 'study' ? ' on' : ''}" href="#/study/night">${ic('flag', 17)} Revision and tags</a>`;
+  $('#treeNav', sb).innerHTML = `<a class="tree-home${r.v === 'home' ? ' on' : ''}" href="#/">${ic('home', 17)} All systems</a>` +
+    `<a class="tree-home${r.v === 'study' ? ' on' : ''}" href="#/study/night">${ic('flag', 17)} Revision and tags</a>` + navExtra(r);
+  const sel = $('#sideSort', sb); if (sel) sel.value = ST.sysSort || 'custom';
+  const list = sortedSystems().filter(x => !q || x.name.toLowerCase().includes(q));
+  let h = '';
   if (!S.systems.length) h += `<p class="tree-empty">Your systems will appear here.</p>`;
-  for (const s of S.systems) {
+  else if (!list.length) h += `<p class="tree-empty">No system matches “${esc(sideFilter.trim())}”.</p>`;
+  for (const s of list) {
     const tops = topicsOf(s.id);
-    h += row('sys', s.id, `#/s/${s.id}`, s.emoji, s.name, IX.sysQ.get(s.id) || 0, tops.length > 0, (r.v === 'system' && r.id === s.id), s.color);
-    if (open(s.id) && tops.length) {
+    h += row('sys', s.id, `#/s/${s.id}`, s.emoji, s.name, IX.sysQ.get(s.id) || 0, !q && tops.length > 0, (r.v === 'system' && r.id === s.id), s.color);
+    if (!q && open(s.id) && tops.length) {
       h += `<div class="tkids" style="--c:${s.color}">`;
       for (const t of tops) {
         const subs = subsOf(t.id);
@@ -820,8 +1023,8 @@ function renderTree() {
       h += `</div>`;
     }
   }
-  sb.innerHTML = h; sb.scrollTop = keep;
-  const on = $('.trow.on', sb); if (on) on.scrollIntoView({ block: 'nearest' });
+  $('#treeSys', sb).innerHTML = h; sb.scrollTop = keep;
+  const on = $('.trow.on', sb); if (on && !q) on.scrollIntoView({ block: 'nearest' });
 }
 
 /* ============================== render ============================== */
@@ -841,17 +1044,24 @@ function render(keepScroll) {
     const qi = $('#q'); if (qi && document.activeElement !== qi) qi.value = r.q;
   } else if (r.v === 'study') {
     html = viewStudy(r.key); title = 'Revision and tags';
+  } else if (r.v === 'exam') {
+    const ek = examById(r.kind); if (!ek) { location.hash = '#/'; return; }
+    html = viewExam(r.kind); title = ek.plural;
+  } else if (r.v === 'cards') {
+    html = viewCards(r); title = 'Flashcards';
   } else html = viewHome();
   if (r.v !== 'search') { const qi = $('#q'); if (qi && document.activeElement !== qi) qi.value = ''; }
   main.innerHTML = html;
   document.title = title === 'FCPS Book' ? title : `${title} · FCPS Book`;
   main.scrollTop = keepScroll ? sc : 0;
-  if (r.v === 'node' && r.qa) { const el = $('#qa-' + r.qa); if (el) { el.classList.remove('closed'); collapsed.delete(r.qa); el.scrollIntoView({ block: 'start' }); el.classList.add('flash'); } }
+  const fid = r.v === 'node' ? r.qa : (r.v === 'exam' ? r.id : null);
+  if (fid) { const el = $('#qa-' + fid); if (el) { el.classList.remove('closed'); collapsed.delete(fid); el.scrollIntoView({ block: 'start' }); el.classList.add('flash'); } }
   if (flashId) { const el = $('#qa-' + flashId); if (el) { el.classList.add('flash'); if (!keepScroll) el.scrollIntoView({ block: 'nearest' }); } flashId = null; }
   renderTree();
 }
 function onRoute() {
-  ensureExpanded(parseRoute());
+  if (parseRoute().v !== 'cards') FC = null;
+  ensureExpanded(parseRoute()); markSeen(parseRoute());
   document.body.classList.remove('drawer');
   closeMenu(); render();
 }
@@ -861,22 +1071,27 @@ const PAL_TEXT = ['#C62828', '#E65100', '#B8860B', '#2E7D32', '#00838F', '#1565C
 const PAL_HL = ['#FFF176', '#FFCC80', '#A5D6A7', '#81D4FA', '#CE93D8', '#F48FB1', '#FFAB91', 'none'];
 const SIZES = [12, 14, 16, 18, 20, 22, 24, 28, 32, 40];
 
-function openEditor(nodeId, qa) {
-  const n = IX.node.get(nodeId), sys = IX.sys.get(n.systemId), p = n.parentId ? IX.node.get(n.parentId) : null;
-  const where = [sys.name, p && p.name, n.name].filter(Boolean).join(' › ');
+function openEditor(nodeId, qa, kind) {
+  /* kind given: editing a Viva, OSPE or case entry (qa is then that entry). Otherwise a question. */
+  const isEntry = !!kind, ek = isEntry ? examById(kind) : null;
+  const n = isEntry ? null : IX.node.get(nodeId), sys = isEntry ? null : IX.sys.get(n.systemId), p = n && n.parentId ? IX.node.get(n.parentId) : null;
+  const where = isEntry ? ek.plural : [sys.name, p && p.name, n.name].filter(Boolean).join(' › ');
+  const accent = isEntry ? ek.color : sys.color;
+  const sysSel = isEntry ? `<label class="ed-sys">System <select id="edSys" class="sel"><option value="">None</option>${S.systems.map(x => `<option value="${x.id}">${esc(x.emoji)} ${esc(x.name)}</option>`).join('')}</select></label>` : '';
+  const tplBtn = isEntry && CASE_TEMPLATES[kind] ? `<button type="button" class="btn small" data-e="tpl">Insert case headings</button>` : '';
   const d = document.createElement('dialog'); d.className = 'editor';
   const tb = (cmd, icon, label, val) => `<button type="button" class="tbtn" data-cmd="${cmd}" ${val ? `data-val="${val}"` : ''} title="${label}" aria-label="${label}">${icon}</button>`;
   d.innerHTML = `
     <div class="ed-top">
-      <div class="ed-where" style="--c:${sys.color}"><span class="dotc"></span><span class="t">${esc(where)}</span></div>
+      <div class="ed-where" style="--c:${accent}"><span class="dotc"></span><span class="t">${esc(where)}</span></div>
       <div class="ed-btns">
         <button type="button" class="btn" data-e="cancel">Cancel</button>
         ${qa ? '' : '<button type="button" class="btn" data-e="next">Save and add next</button>'}
         <button type="button" class="btn primary" data-e="save">${qa ? 'Save changes' : 'Save'}</button>
       </div>
     </div>
-    <div class="ed-q"><label for="edQ">Question</label><textarea id="edQ" rows="2" placeholder="Type the question"></textarea>
-      <div class="ed-tags"><button type="button" class="btn small" data-e="tags">${ic('tag', 15)} Tags and revision</button><span class="ptags" id="edPills"></span></div></div>
+    <div class="ed-q"><label for="edQ">${isEntry ? 'Title' : 'Question'}</label><textarea id="edQ" rows="2" placeholder="${isEntry ? 'Type a title' : 'Type the question'}"></textarea>
+      <div class="ed-tags"><button type="button" class="btn small" data-e="tags">${ic('tag', 15)} Tags and revision</button><span class="ptags" id="edPills"></span>${sysSel}${tplBtn}</div></div>
     <div class="tb" role="toolbar" aria-label="Formatting">
       <select data-sel="font" aria-label="Font"><option value="" selected disabled>Font</option>${FONTS.map(f => `<option value="${f.name}">${f.name}</option>`).join('')}</select>
       <select data-sel="size" aria-label="Font size"><option value="" selected disabled>Size</option>${SIZES.map(s => `<option value="${s}">${s}</option>`).join('')}</select>
@@ -893,12 +1108,14 @@ function openEditor(nodeId, qa) {
       ${tb('removeFormat', ic('eraser', 17), 'Clear formatting')}${tb('undo', ic('undo', 17), 'Undo')}${tb('redo', ic('redo', 17), 'Redo')}
       <div class="pal" hidden></div>
     </div>
-    <div class="ed-a-wrap"><div id="edA" class="rich editable" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Answer" data-ph="Write or paste the answer here"></div></div>`;
+    <div class="ed-a-wrap"><div id="edA" class="rich editable" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Answer" data-ph="${isEntry ? 'Write or paste the content here' : 'Write or paste the answer here'}"></div></div>`;
   document.body.appendChild(d);
   const ed = $('#edA', d), eq = $('#edQ', d), pal = $('.pal', d);
-  eq.value = qa ? qa.q : ''; ed.innerHTML = qa ? qa.a : '';
+  const edSys = isEntry ? $('#edSys', d) : null;
+  eq.value = qa ? (isEntry ? qa.title : qa.q) : ''; ed.innerHTML = qa ? (isEntry ? qa.body : qa.a) : '';
+  if (edSys) edSys.value = (qa && qa.systemId) || '';
   let edTags = ((qa && qa.tags) || []).slice(), edRev = ((qa && qa.rev) || []).slice();
-  const snap = () => eq.value + '\u0000' + ed.innerHTML + '\u0000' + edTags.join(',') + '|' + edRev.join(',');
+  const snap = () => eq.value + '\u0000' + ed.innerHTML + '\u0000' + edTags.join(',') + '|' + edRev.join(',') + '|' + (edSys ? edSys.value : '');
   const showPills = () => { $('#edPills', d).innerHTML = qaPills({ tags: edTags, rev: edRev }) || '<span class="muted small">None yet</span>'; };
   let base = snap();
   showPills();
@@ -965,6 +1182,7 @@ function openEditor(nodeId, qa) {
     if (a) {
       if (a.dataset.e === 'cancel') tryClose();
       else if (a.dataset.e === 'tags') dlgTags({ tags: edTags, rev: edRev }).then(v => { if (v) { edTags = v.tags; edRev = v.rev; showPills(); } });
+      else if (a.dataset.e === 'tpl') { if (stripHtml(ed.innerHTML)) ed.insertAdjacentHTML('beforeend', CASE_TEMPLATES[kind]); else ed.innerHTML = CASE_TEMPLATES[kind]; }
       else doSave(a.dataset.e === 'next');
     }
   });
@@ -987,7 +1205,7 @@ function openEditor(nodeId, qa) {
 
   const cleanup = () => { document.removeEventListener('selectionchange', onSel); d.close(); d.remove(); };
   const tryClose = async () => {
-    if (snap() !== base) { const ok = await confirmDlg('Discard changes?', 'You have unsaved changes to this question.', 'Discard'); if (!ok) return; }
+    if (snap() !== base) { const ok = await confirmDlg('Discard changes?', 'You have unsaved changes.', 'Discard'); if (!ok) return; }
     cleanup();
   };
   d.addEventListener('cancel', e => { e.preventDefault(); tryClose(); });
@@ -995,12 +1213,20 @@ function openEditor(nodeId, qa) {
 
   async function doSave(next) {
     const qv = eq.value.trim();
-    if (!qv) { toast('Type the question first'); eq.focus(); return; }
+    if (!qv) { toast(isEntry ? 'Type a title first' : 'Type the question first'); eq.focus(); return; }
     let a = sanitize(ed.innerHTML, false);
     if (!stripHtml(a)) a = '';
     let rec = qa;
     try {
-      if (qa) { qa.q = qv; qa.a = a; qa.tags = edTags.slice(); qa.rev = edRev.slice(); qa.updatedAt = Date.now(); await save({ qas: [qa] }); }
+      if (isEntry) {
+        const sid = edSys.value || null;
+        if (qa) { qa.title = qv; qa.body = a; qa.systemId = sid; qa.tags = edTags.slice(); qa.rev = edRev.slice(); qa.updatedAt = Date.now(); await save({ exams: [qa] }); }
+        else {
+          const sibs = examsOf(kind);
+          rec = { id: uid(), kind, title: qv, body: a, systemId: sid, tags: edTags.slice(), rev: edRev.slice(), order: sibs.length ? Math.max(...sibs.map(x => x.order)) + 1 : 0, createdAt: Date.now(), updatedAt: Date.now() };
+          S.exams.push(rec); await save({ exams: [rec] });
+        }
+      } else if (qa) { qa.q = qv; qa.a = a; qa.tags = edTags.slice(); qa.rev = edRev.slice(); qa.updatedAt = Date.now(); await save({ qas: [qa] }); }
       else {
         const sibs = qasOf(nodeId);
         rec = { id: uid(), systemId: n.systemId, nodeId, q: qv, a, tags: edTags.slice(), rev: edRev.slice(), order: sibs.length ? Math.max(...sibs.map(x => x.order)) + 1 : 0, createdAt: Date.now(), updatedAt: Date.now() };
@@ -1009,7 +1235,7 @@ function openEditor(nodeId, qa) {
     } catch (e) { return; }
     reindex(); flashId = rec.id;
     if (next) {
-      eq.value = ''; ed.innerHTML = ''; edTags = []; edRev = []; showPills(); base = snap(); fit(); eq.focus(); render(true); toast('Saved. Ready for the next question.');
+      eq.value = ''; ed.innerHTML = ''; edTags = []; edRev = []; showPills(); base = snap(); fit(); eq.focus(); render(true); toast('Saved. Ready for the next one.');
     } else { base = snap(); cleanup(); render(true); toast('Saved'); }
   }
   d.showModal(); fit();
@@ -1018,7 +1244,7 @@ function openEditor(nodeId, qa) {
 
 /* ============================== settings + backup ============================== */
 function exportBackup() {
-  const data = { app: 'fcps-book', version: 1, exportedAt: new Date().toISOString(), settings: { theme: ST.theme, uiFont: ST.uiFont, noteFont: ST.noteFont, noteSize: ST.noteSize, customTags: ST.customTags || [] }, systems: S.systems, nodes: S.nodes, qas: S.qas };
+  const data = { app: 'fcps-book', version: 1, exportedAt: new Date().toISOString(), settings: { theme: ST.theme, uiFont: ST.uiFont, noteFont: ST.noteFont, noteSize: ST.noteSize, customTags: ST.customTags || [] }, systems: S.systems, nodes: S.nodes, qas: S.qas, exams: S.exams };
   const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob); a.download = `fcps-book-backup-${new Date().toISOString().slice(0, 10)}.json`;
@@ -1029,13 +1255,115 @@ function exportBackup() {
   if (parseRoute().v === 'home') render(true);
 }
 function pickBackup() {
-  const i = document.createElement('input'); i.type = 'file'; i.accept = '.json,application/json';
+  const i = document.createElement('input'); i.type = 'file'; i.multiple = true; i.accept = '.json,application/json';
   i.onchange = async () => {
-    const f = i.files && i.files[0]; if (!f) return;
-    try { await importBackup(JSON.parse(await f.text())); }
-    catch (e) { if (e && e.message !== 'cancelled') toast('That file could not be read. Choose a backup made by FCPS Book.'); }
+    const fs = Array.from(i.files || []); if (!fs.length) return;
+    try {
+      const all = []; for (const f of fs) all.push(JSON.parse(await f.text()));
+      if (all.every(d => d && d.app === 'fcps-book-import')) await importDocument(all.length > 1 ? mergeImportFiles(all) : all[0]);
+      else if (all.length === 1) await importBackup(all[0]);
+      else throw new Error('bad');
+    } catch (e) { if (!e || e.message !== 'cancelled') toast('That file could not be read. Choose a backup or an import file made for FCPS Book.'); }
   };
   i.click();
+}
+
+/* ---------- import of question files made from documents ---------- */
+const plainToHtml = t => String(t || '').split(/\r?\n/).map(l => l.trim() ? `<p>${esc(l)}</p>` : '').join('');
+const asHtml = t => /<[a-z][\s\S]*>/i.test(String(t || '')) ? String(t) : plainToHtml(t);
+const normQ = t => String(t || '').toLowerCase().replace(/^\s*(q(uestion)?\s*)?\d+\s*[.):-]\s*/i, '').replace(/[^a-z0-9\u0980-\u09ff]+/g, '');
+function mergeImportFiles(list) {
+  const by = new Map();
+  list.forEach(d => (d.systems || []).forEach(x => { if (!x || !x.name) return; const k = normName(x.name); if (!by.has(k)) by.set(k, { name: x.name, topics: [] }); by.get(k).topics.push(...(x.topics || [])); }));
+  return { app: 'fcps-book-import', version: 1, systems: [...by.values()], exams: list.flatMap(d => d.exams || []) };
+}
+async function importDocument(data) {
+  if (!data || data.app !== 'fcps-book-import' || !Array.isArray(data.systems)) throw new Error('bad');
+  const files = data.systems.filter(x => x && String(x.name || '').trim());
+  const exams = (Array.isArray(data.exams) ? data.exams : []).filter(e => e && examById(e.kind) && String(e.title || '').trim());
+  if (!files.length && !exams.length) throw new Error('bad');
+  const qCount = x => (x.topics || []).reduce((a, t) => a + (t.questions || []).length + (t.subtopics || []).reduce((b, u) => b + (u.questions || []).length, 0), 0);
+  const auto = name => { const m = S.systems.find(x => normName(x.name) === normName(name)); return m ? m.id : ''; };
+  const opts = sel => `<option value="">Create a new system</option>` + S.systems.map(x => `<option value="${x.id}" ${x.id === sel ? 'selected' : ''}>${esc(x.emoji)} ${esc(x.name)}</option>`).join('');
+  const totalQ = files.reduce((a, x) => a + qCount(x), 0);
+  const choice = await openDialog({
+    title: 'Import questions', primary: 'Import', wide: true,
+    html: `<p>This file has ${plural(totalQ, 'question')}${files.length ? ` for ${plural(files.length, 'system')}` : ''}${exams.length ? `, and ${exams.length} exam ${exams.length === 1 ? 'entry' : 'entries'}` : ''}.</p>
+      ${files.length ? `<div class="imp-list">${files.map((x, i) => `<div class="imp-row"><div><b>${esc(x.name)}</b><small>${plural(qCount(x), 'question')} in ${plural((x.topics || []).length, 'topic')}</small></div><select class="sel" data-i="${i}" aria-label="Where to put ${esc(x.name)}">${opts(auto(x.name))}</select></div>`).join('')}</div>` : ''}
+      <label class="radio-row"><input type="checkbox" name="skipdup" checked><span><b>Skip questions that already exist</b>Compares the question text inside the same topic.</span></label>
+      <p class="muted small">Your current book is kept. New topics are created when needed. You can undo right after.</p>`,
+    collect: d => ({ map: $$('select[data-i]', d).map(x => x.value), skip: $('[name=skipdup]', d).checked })
+  });
+  if (!choice) throw new Error('cancelled');
+
+  const now = Date.now(), added = { systems: [], nodes: [], qas: [], exams: [] };
+  let dup = 0, newTopics = 0; const unknownTags = new Set();
+  const findTag = t => { const v = String(t).trim().toLowerCase(); const f = allTags().find(x => x.id.toLowerCase() === v || x.name.toLowerCase() === v); if (!f) unknownTags.add(String(t)); return f ? f.id : null; };
+  const findRev = t => { const v = String(t).trim().toLowerCase(); const f = REVS.find(x => x.id === v || x.name.toLowerCase() === v || x.short.toLowerCase() === v); return f ? f.id : null; };
+  const mapT = arr => [...new Set((Array.isArray(arr) ? arr : []).map(findTag).filter(Boolean))];
+  const mapR = arr => [...new Set((Array.isArray(arr) ? arr : []).map(findRev).filter(Boolean))];
+
+  const sysTarget = files.map((x, i) => {
+    if (choice.map[i]) return choice.map[i];
+    const prev = added.systems.find(z => normName(z.name) === normName(x.name)); if (prev) return prev.id;
+    const seedEntry = SEED.find(e => normName(e[0]) === normName(x.name));
+    const rec = { id: uid(), name: String(x.name).trim(), emoji: seedEntry ? seedEntry[1] : '📚', color: COLORS[(S.systems.length + added.systems.length) % COLORS.length],
+      order: (S.systems.length ? Math.max(...S.systems.map(z => z.order)) : -1) + 1 + added.systems.length, createdAt: now };
+    added.systems.push(rec); return rec.id;
+  });
+
+  const nodeKey = (sid, pid, name) => sid + '|' + (pid || '') + '|' + normName(name);
+  const nodeMap = new Map(S.nodes.map(n => [nodeKey(n.systemId, n.parentId, n.name), n]));
+  const getNode = (sid, parent, name) => {
+    const nm = String(name || '').trim() || 'General', k = nodeKey(sid, parent ? parent.id : null, nm);
+    let n = nodeMap.get(k);
+    if (!n) {
+      const sibs = S.nodes.concat(added.nodes).filter(z => z.systemId === sid && (z.parentId || null) === (parent ? parent.id : null));
+      n = { id: uid(), systemId: sid, parentId: parent ? parent.id : null, name: nm, order: sibs.length ? Math.max(...sibs.map(z => z.order)) + 1 : 0, createdAt: now };
+      nodeMap.set(k, n); added.nodes.push(n); newTopics++;
+    }
+    return n;
+  };
+  const nextOrder = new Map(), seen = new Map();
+  const ordFor = nid => { if (!nextOrder.has(nid)) { const qs = qasOf(nid); nextOrder.set(nid, qs.length ? Math.max(...qs.map(z => z.order)) + 1 : 0); } const v = nextOrder.get(nid); nextOrder.set(nid, v + 1); return v; };
+  const seenFor = nid => { if (!seen.has(nid)) seen.set(nid, new Set(qasOf(nid).map(z => normQ(z.q)))); return seen.get(nid); };
+  const addQs = (node, list) => (list || []).forEach(q => {
+    const qt = String((q && q.q) || '').trim(); if (!qt) return;
+    const set = seenFor(node.id), k = normQ(qt);
+    if (choice.skip && set.has(k)) { dup++; return; }
+    set.add(k);
+    let a = sanitize(asHtml(q.a), false); if (!stripHtml(a)) a = '';
+    added.qas.push({ id: uid(), systemId: node.systemId, nodeId: node.id, q: qt, a, tags: mapT(q.tags), rev: mapR(q.rev), order: ordFor(node.id), createdAt: now, updatedAt: now });
+  });
+  files.forEach((x, i) => (x.topics || []).forEach(t => {
+    const tn = getNode(sysTarget[i], null, t.name); addQs(tn, t.questions);
+    (t.subtopics || []).forEach(u => addQs(getNode(sysTarget[i], tn, u.name), u.questions));
+  }));
+  exams.forEach(e => {
+    let sid = null;
+    if (e.system) { const idx = files.findIndex(f => normName(f.name) === normName(e.system)); sid = idx > -1 ? sysTarget[idx] : (auto(e.system) || null); }
+    const all = S.exams.concat(added.exams).filter(z => z.kind === e.kind);
+    if (choice.skip && all.some(z => normQ(z.title) === normQ(e.title))) { dup++; return; }
+    let body = sanitize(asHtml(e.body), false); if (!stripHtml(body)) body = '';
+    added.exams.push({ id: uid(), kind: e.kind, title: String(e.title).trim(), body, systemId: sid, tags: mapT(e.tags), rev: mapR(e.rev), order: all.length ? Math.max(...all.map(z => z.order)) + 1 : 0, createdAt: now, updatedAt: now });
+  });
+
+  await save({ systems: added.systems, nodes: added.nodes, qas: added.qas, exams: added.exams });
+  S.systems.push(...added.systems); S.nodes.push(...added.nodes); S.qas.push(...added.qas); S.exams.push(...added.exams);
+  reindex(); render();
+  const undo = async () => {
+    const ids = k => new Set(added[k].map(z => z.id)), sI = ids('systems'), nI = ids('nodes'), qI = ids('qas'), eI = ids('exams');
+    S.systems = S.systems.filter(z => !sI.has(z.id)); S.nodes = S.nodes.filter(z => !nI.has(z.id)); S.qas = S.qas.filter(z => !qI.has(z.id)); S.exams = S.exams.filter(z => !eI.has(z.id));
+    await save({}, { systems: [...sI], nodes: [...nI], qas: [...qI], exams: [...eI] });
+    reindex(); render(); toast('Import undone');
+  };
+  await openDialog({
+    title: 'Import finished', primary: 'Done', secondary: null,
+    html: `<p><b>${plural(added.qas.length, 'question')}</b> added${added.exams.length ? ` and ${added.exams.length} exam ${added.exams.length === 1 ? 'entry' : 'entries'}` : ''}.</p>
+      <ul class="imp-sum"><li>${plural(added.systems.length, 'new system')}</li><li>${newTopics} new ${newTopics === 1 ? 'topic or subtopic' : 'topics and subtopics'}</li><li>${plural(dup, 'duplicate')} skipped</li>${unknownTags.size ? `<li>Tags not recognised and left out: ${esc([...unknownTags].join(', '))}</li>` : ''}</ul>
+      <button type="button" class="btn small" id="impUndo">Undo this import</button>`,
+    onOpen: d => $('#impUndo', d).addEventListener('click', async () => { d.close(); await undo(); })
+  });
 }
 async function importBackup(data) {
   if (!data || data.app !== 'fcps-book' || !Array.isArray(data.systems) || !Array.isArray(data.nodes) || !Array.isArray(data.qas)) throw new Error('bad');
@@ -1044,9 +1372,10 @@ async function importBackup(data) {
   const nodes = data.nodes.filter(n => n && n.id && n.name && sysIds.has(n.systemId)).map(n => ({ id: n.id, systemId: n.systemId, parentId: n.parentId || null, name: String(n.name), order: +n.order || 0, createdAt: n.createdAt || Date.now() }));
   const nodeIds = new Set(nodes.map(n => n.id));
   const qas = data.qas.filter(q => q && q.id && nodeIds.has(q.nodeId) && sysIds.has(q.systemId)).map(q => ({ id: q.id, systemId: q.systemId, nodeId: q.nodeId, q: String(q.q || ''), a: sanitize(q.a || '', false), tags: Array.isArray(q.tags) ? q.tags.filter(x => typeof x === 'string').slice(0, 30) : [], rev: Array.isArray(q.rev) ? q.rev.filter(revById) : [], order: +q.order || 0, createdAt: q.createdAt || Date.now(), updatedAt: q.updatedAt || Date.now() }));
+  const exams = (Array.isArray(data.exams) ? data.exams : []).filter(x => x && x.id && examById(x.kind)).map(x => ({ id: x.id, kind: x.kind, title: String(x.title || ''), body: sanitize(x.body || '', false), systemId: sysIds.has(x.systemId) ? x.systemId : null, tags: Array.isArray(x.tags) ? x.tags.filter(t => typeof t === 'string').slice(0, 30) : [], rev: Array.isArray(x.rev) ? x.rev.filter(revById) : [], order: +x.order || 0, createdAt: x.createdAt || Date.now(), updatedAt: x.updatedAt || Date.now() }));
   const mode = await openDialog({
     title: 'Restore from backup', primary: 'Restore', wide: false,
-    html: `<p>This file has ${plural(systems.length, 'system')}, ${plural(nodes.length, 'topic/subtopic')} and ${plural(qas.length, 'question')}.</p>
+    html: `<p>This file has ${plural(systems.length, 'system')}, ${plural(nodes.length, 'topic/subtopic')}, ${plural(qas.length, 'question')} and ${exams.length} exam ${exams.length === 1 ? 'entry' : 'entries'}.</p>
       <label class="radio-row"><input type="radio" name="mode" value="merge" checked><span><b>Add to my book</b>Keeps what you have and adds or updates items from the file.</span></label>
       <label class="radio-row"><input type="radio" name="mode" value="replace"><span><b>Replace my book</b>Deletes everything here first, then restores the file.</span></label>`,
     collect: d => $('[name=mode]:checked', d).value
@@ -1057,12 +1386,12 @@ async function importBackup(data) {
   else inc.forEach(t => { if (!allTags().some(x => x.id === t.id)) ST.customTags.push(t); });
   saveST();
   if (mode === 'replace') {
-    await commit({ systems, nodes, qas }, { systems: S.systems.map(x => x.id), nodes: S.nodes.map(x => x.id), qas: S.qas.map(x => x.id) });
-    S.systems = systems; S.nodes = nodes; S.qas = qas;
+    await commit({ systems, nodes, qas, exams }, { systems: S.systems.map(x => x.id), nodes: S.nodes.map(x => x.id), qas: S.qas.map(x => x.id), exams: S.exams.map(x => x.id) });
+    S.systems = systems; S.nodes = nodes; S.qas = qas; S.exams = exams;
   } else {
-    await commit({ systems, nodes, qas });
+    await commit({ systems, nodes, qas, exams });
     const merge = (arr, inc) => { const m = new Map(arr.map(x => [x.id, x])); inc.forEach(x => m.set(x.id, x)); return [...m.values()]; };
-    S.systems = merge(S.systems, systems); S.nodes = merge(S.nodes, nodes); S.qas = merge(S.qas, qas);
+    S.systems = merge(S.systems, systems); S.nodes = merge(S.nodes, nodes); S.qas = merge(S.qas, qas); S.exams = merge(S.exams, exams);
   }
   IX.text.clear(); reindex(); ST.seeded = true; saveST(); onRoute();
   toast('Backup restored');
@@ -1084,8 +1413,8 @@ async function openSettings() {
       <div class="set-sec"><h3>App font</h3><div class="font-grid" id="fgUi">${fontGrid('uiFont')}</div></div>
       <div class="set-sec"><h3>Answer font</h3><div class="font-grid" id="fgNote">${fontGrid('noteFont')}</div>
         <div class="range-row"><span class="small">Size</span><input type="range" id="szRange" min="14" max="26" step="1" value="${ST.noteSize}" aria-label="Answer text size"><b id="szVal">${ST.noteSize}px</b></div></div>
-      <div class="set-sec"><h3>Backup</h3><p class="muted small">Last backup: ${last}. Use a backup file to move your book between your MacBook and iPhone, and to keep it safe.</p>
-        <div class="btn-row"><button type="button" class="btn" id="bkExport">${ic('download', 16)} Export backup</button><button type="button" class="btn" id="bkImport">${ic('upload', 16)} Restore from backup</button></div></div>
+      <div class="set-sec"><h3>Backup and import</h3><p class="muted small">Last backup: ${last}. Use a backup file to move your book between your MacBook and iPhone, and to keep it safe.</p>
+        <div class="btn-row"><button type="button" class="btn" id="bkExport">${ic('download', 16)} Export backup</button><button type="button" class="btn" id="bkImport">${ic('upload', 16)} Restore from backup</button><button type="button" class="btn" id="docImport">${ic('upload', 16)} Import questions from a file</button></div></div>
       <div class="set-sec"><h3>Storage</h3><p class="muted small">${est ? est + '. ' : ''}${persisted === true ? 'This browser has marked your data as persistent.' : 'For the safest storage, install the app: on Mac use Safari > File > Add to Dock; on iPhone use Share > Add to Home Screen.'}</p></div>
       <p class="muted small">FCPS Book, ${APP_VERSION}</p>`,
     onOpen: d => {
@@ -1095,7 +1424,7 @@ async function openSettings() {
         const f = e.target.closest('.font-btn');
         if (f) { ST[f.dataset.font] = f.dataset.id; saveST(); applyLook(); $$(`[data-font="${f.dataset.font}"]`, d).forEach(b => b.classList.toggle('on', b === f)); return; }
         if (e.target.closest('#bkExport')) exportBackup();
-        if (e.target.closest('#bkImport')) { d.close(); pickBackup(); }
+        if (e.target.closest('#bkImport') || e.target.closest('#docImport')) { d.close(); pickBackup(); }
       });
       $('#dsRange', d).addEventListener('input', e => { ST.dashSize = +e.target.value; saveST(); applyLook(); });
       $('#szRange', d).addEventListener('input', e => { ST.noteSize = +e.target.value; $('#szVal', d).textContent = ST.noteSize + 'px'; saveST(); applyLook(); });
@@ -1114,19 +1443,46 @@ const ACT = {
   'collapse-all': () => { $$('.qa').forEach(a => { collapsed.add(a.dataset.id); a.classList.add('closed'); }); },
   'expand-all': () => { collapsed.clear(); $$('.qa').forEach(a => a.classList.remove('closed')); },
   'backup-now': () => exportBackup(),
+  'import-file': () => pickBackup(),
   'dash-down': () => { ST.dashSize = Math.max(11, (ST.dashSize || 17) - 1); saveST(); applyLook(); },
   'dash-up': () => { ST.dashSize = Math.min(22, (ST.dashSize || 17) + 1); saveST(); applyLook(); },
   'qa-tags': async el => {
-    const q = S.qas.find(x => x.id === el.dataset.id); if (!q) return;
+    const q = findItem(el.dataset.id); if (!q) return;
     const v = await dlgTags({ tags: q.tags || [], rev: q.rev || [] }); if (!v) return;
     q.tags = v.tags; q.rev = v.rev; q.updatedAt = Date.now();
-    await save({ qas: [q] }); reindex(); render(true);
+    await save({ [storeOf(q)]: [q] }); reindex(); render(true);
   },
   'rev-remove': async el => {
-    const q = S.qas.find(x => x.id === el.dataset.id), key = el.dataset.key; if (!q) return;
+    const q = findItem(el.dataset.id), key = el.dataset.key; if (!q) return;
     q.rev = (q.rev || []).filter(x => x !== key); q.updatedAt = Date.now();
-    await save({ qas: [q] }); reindex(); render(true);
-    toast('Removed from the list', { undo: async () => { q.rev = (q.rev || []).concat(key); q.updatedAt = Date.now(); await save({ qas: [q] }); reindex(); render(true); } });
+    await save({ [storeOf(q)]: [q] }); reindex(); render(true);
+    toast('Removed from the list', { undo: async () => { q.rev = (q.rev || []).concat(key); q.updatedAt = Date.now(); await save({ [storeOf(q)]: [q] }); reindex(); render(true); } });
+  },
+  'new-entry': el => openEditor(null, null, el.dataset.kind),
+  'edit-entry': el => { const e = S.exams.find(x => x.id === el.dataset.id); if (e) openEditor(null, e, e.kind); },
+  'entry-menu': el => {
+    const e = S.exams.find(x => x.id === el.dataset.id); if (!e) return;
+    openMenu(el, [
+      { label: 'Edit', icon: 'edit', run: () => openEditor(null, e, e.kind) },
+      { label: 'Tags and revision', icon: 'tag', run: () => ACT['qa-tags']({ dataset: { id: e.id } }) },
+      { label: 'Move to another section', icon: 'move', run: () => moveEntry(e.id) },
+      '-', ...(parseRoute().v === 'exam' ? [...orderItems('exams', examsOf(e.kind), e.id, false), '-'] : []),
+      { label: 'Delete', icon: 'trash', danger: true, run: () => deleteEntry(e.id) }
+    ]);
+  },
+  'fc-flip': () => { if (FC && FC.queue.length) { FC.flip = true; render(true); } },
+  'fc-know': () => fcRate(true),
+  'fc-again': () => fcRate(false),
+  'fc-restart': () => { FC = null; render(); },
+  'fc-shuffle': () => { ST.fcShuffle = !(ST.fcShuffle !== false); saveST(); FC = null; render(); },
+  'fc-missed': () => { if (FC && FC.missed.length) { fcStart(FC.key, FC.missed, FC.title, FC.back); render(); } },
+  'fc-mark': el => {
+    if (!FC) return;
+    openMenu(el, REVS.map(r => ({ label: 'Add to ' + r.name, icon: 'flag', run: async () => {
+      const qs = FC.missed.map(id => S.qas.find(q => q.id === id)).filter(Boolean);
+      qs.forEach(q => { if (!(q.rev || []).includes(r.id)) q.rev = (q.rev || []).concat(r.id); q.updatedAt = Date.now(); });
+      await save({ qas: qs }); reindex(); toast(`${plural(qs.length, 'question')} added to ${r.name}`);
+    } })));
   },
   'tog': el => {
     const id = el.dataset.id, i = ST.expanded.indexOf(id);
@@ -1138,7 +1494,7 @@ const ACT = {
     openMenu(el, [
       { label: 'Add topic', icon: 'plus', run: () => addNode(s.id, null) },
       { label: 'Edit name, icon and colour', icon: 'edit', run: () => editSystem(s.id) },
-      '-', ...orderItems('systems', S.systems, s.id, horizontal), '-',
+      '-', ...(isCustom() ? [...orderItems('systems', S.systems, s.id, horizontal), '-'] : [{ label: 'Use my own order to move systems', icon: 'first', run: () => setSort('custom') }, '-']),
       { label: 'Delete system', icon: 'trash', danger: true, run: () => deleteSystem(s.id) }
     ]);
   },
@@ -1180,6 +1536,16 @@ function wire() {
     if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('.card.sys')) { e.preventDefault(); location.hash = '#/s/' + e.target.dataset.id; }
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k' && !$('dialog[open]')) { e.preventDefault(); $('#q').focus(); $('#q').select(); }
   });
+  document.addEventListener('keydown', e => {
+    if (parseRoute().v !== 'cards' || !FC || $('dialog[open]') || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.target.matches && e.target.matches('input,textarea,select,[contenteditable]')) return;
+    if ((e.key === ' ' || e.key === 'Enter') && !FC.flip && FC.queue.length) { e.preventDefault(); ACT['fc-flip'](); }
+    else if (FC.flip && (e.key === '1' || e.key === 'ArrowLeft')) { e.preventDefault(); fcRate(false); }
+    else if (FC.flip && (e.key === '2' || e.key === 'ArrowRight')) { e.preventDefault(); fcRate(true); }
+  });
+  $('#main').addEventListener('change', e => { if (e.target.id === 'examSys') { examSys = e.target.value; render(true); } else if (e.target.id === 'sysSort') setSort(e.target.value); });
+  $('#sidebar').addEventListener('change', e => { if (e.target.id === 'sideSort') setSort(e.target.value); });
+  $('#sidebar').addEventListener('input', e => { if (e.target.id === 'sideFind') { sideFilter = e.target.value; renderTree(); } });
   $('#settingsBtn').addEventListener('click', openSettings);
   $('#menuBtn').addEventListener('click', () => document.body.classList.toggle('drawer'));
   $('#scrim').addEventListener('click', () => document.body.classList.remove('drawer'));
@@ -1218,10 +1584,10 @@ async function start() {
   wire();
   try { db = await openDB(); }
   catch (e) { $('#main').innerHTML = '<div class="empty"><p><b>Storage is not available.</b> Open this app in a normal (not private) browser window.</p></div>'; return; }
-  [S.systems, S.nodes, S.qas] = await Promise.all(STORES.map(readAll));
+  [S.systems, S.nodes, S.qas, S.exams] = await Promise.all(STORES.map(readAll));
   if (!S.systems.length && !ST.seeded) await seed(); else await migrateSystems();
   reindex();
-  ensureExpanded(parseRoute());
+  ensureExpanded(parseRoute()); markSeen(parseRoute());
   render();
   if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => {});
 }
