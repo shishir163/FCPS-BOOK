@@ -1,6 +1,6 @@
 /* FCPS Book service worker: caches everything so the app works offline.
    When you upload a new version to GitHub, change VERSION so phones and laptops pick it up. */
-const VERSION = 'fcps-book-phase1-v1';
+const VERSION = 'fcps-book-phase2b-v1';
 const CORE = [
   "./",
   "index.html",

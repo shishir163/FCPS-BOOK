@@ -1,10 +1,10 @@
-/* FCPS Book — Phase 1
+/* FCPS Book — Phase 2.1 (tags, revision lists, new system list, dashboard text size, night themes)
  * System > Topic > Subtopic > Question & answer. Offline, stored in IndexedDB.
  */
 (() => {
 'use strict';
 
-const APP_VERSION = 'Phase 1';
+const APP_VERSION = 'Phase 2.1';
 
 /* ============================== utilities ============================== */
 const $ = (s, r = document) => r.querySelector(s);
@@ -43,7 +43,9 @@ const P = {
   ul: '<path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1" fill="currentColor"/><circle cx="4.5" cy="12" r="1" fill="currentColor"/><circle cx="4.5" cy="18" r="1" fill="currentColor"/>',
   ol: '<path d="M10 6h10M10 12h10M10 18h10M4 5l1.5-1v5M4 14.5c0-1 2.5-1 2.5.3 0 1-2.5 2.2-2.5 3.2h2.7"/>',
   eraser: '<path d="m7 20-4-4 10-10 7 7-6 7z"/><path d="M9 20h11"/>',
-  check: '<path d="m5 12 5 5 9-10"/>'
+  check: '<path d="m5 12 5 5 9-10"/>',
+  tag: '<path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="8.5" r="1.3" fill="currentColor"/>',
+  flag: '<path d="M5 21V4M5 4h11l-2 4 2 4H5"/>'
 };
 const ic = (n, s = 18) => `<svg class="ic" width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[n] || P.dot}</svg>`;
 
@@ -61,15 +63,20 @@ const fontCss = f => `"${f.name}", ${f.serif ? 'Georgia, serif' : 'system-ui, sa
 
 const THEMES = [
   { id: 'light', name: 'Light', c: ['#F1F5FB', '#FFFFFF', '#0F7B8A'] },
-  { id: 'dark', name: 'Dark', c: ['#0E121A', '#161C28', '#4CCFC4'] },
   { id: 'sepia', name: 'Sepia', c: ['#EEE2C6', '#F7EFDB', '#A2551A'] },
   { id: 'ocean', name: 'Ocean', c: ['#E2EFFA', '#F6FAFE', '#0B63CE'] },
   { id: 'forest', name: 'Forest', c: ['#E4F0E6', '#F5FAF5', '#1E7F4F'] },
-  { id: 'rose', name: 'Rose', c: ['#FBE9F0', '#FFF7FA', '#C2185B'] }
+  { id: 'rose', name: 'Rose', c: ['#FBE9F0', '#FFF7FA', '#C2185B'] },
+  { id: 'dark', name: 'Dark', night: 1, c: ['#0E121A', '#161C28', '#4CCFC4'] },
+  { id: 'midnight', name: 'Midnight blue', night: 1, c: ['#0A1020', '#111B33', '#6CA8FF'] },
+  { id: 'black', name: 'Pure black', night: 1, c: ['#000000', '#0B0B0D', '#7CE0C3'] },
+  { id: 'charcoal', name: 'Charcoal', night: 1, c: ['#1B1C1F', '#25272B', '#8AB4F8'] },
+  { id: 'nightwarm', name: 'Warm night', night: 1, c: ['#17130E', '#211B14', '#E6A65C'] },
+  { id: 'dusk', name: 'Dusk violet', night: 1, c: ['#14101F', '#1D1730', '#B79CFF'] }
 ];
 
 const SKEY = 'fcpsbook.settings.v1';
-const DEF = { theme: 'light', uiFont: 'lato', noteFont: 'lato', noteSize: 17, seeded: false, lastBackup: 0, lastNode: null, expanded: [], persistAsked: false };
+const DEF = { theme: 'light', uiFont: 'lato', noteFont: 'lato', noteSize: 17, seeded: false, lastBackup: 0, lastNode: null, expanded: [], persistAsked: false, customTags: [], dashSize: 17, sysListV: 0 };
 let ST = { ...DEF };
 try { ST = { ...DEF, ...JSON.parse(localStorage.getItem(SKEY) || '{}') }; } catch (e) {}
 const saveST = () => { try { localStorage.setItem(SKEY, JSON.stringify(ST)); } catch (e) {} };
@@ -80,6 +87,7 @@ function applyLook() {
   r.style.setProperty('--font-ui', fontCss(fontById(ST.uiFont)));
   r.style.setProperty('--font-note', fontCss(fontById(ST.noteFont)));
   r.style.setProperty('--note-size', ST.noteSize + 'px');
+  r.style.setProperty('--dash-size', (ST.dashSize || 17) + 'px');
   const meta = $('meta[name="theme-color"]');
   if (meta) meta.content = getComputedStyle(r).getPropertyValue('--bar').trim() || '#FFFFFF';
 }
@@ -156,7 +164,8 @@ function qText(q) {
   const c = IX.text.get(q.id);
   if (c && c.u === q.updatedAt) return c;
   const t = stripHtml(q.a);
-  const rec = { u: q.updatedAt, t, l: (q.q + ' ' + t).toLowerCase(), ql: q.q.toLowerCase() };
+  const names = (q.rev || []).map(revById).concat((q.tags || []).map(tagById)).filter(Boolean).map(x => x.name).join(' ');
+  const rec = { u: q.updatedAt, t, l: (q.q + ' ' + t + ' ' + names).toLowerCase(), ql: q.q.toLowerCase() };
   IX.text.set(q.id, rec);
   return rec;
 }
@@ -164,25 +173,82 @@ function qText(q) {
 const COLORS = ['#EF5B5B', '#F08A24', '#E0A100', '#7CB518', '#2FA36B', '#14A3A3', '#1F9BD1', '#3B6FE0', '#6B5CE7', '#A24BD8', '#E0489F', '#64748B'];
 const EMOJIS = ['📚', '🫁', '❤️', '🧠', '😴', '🤰', '💊', '💉', '🏥', '🎯', '📋', '🧓', '🍼', '🔥', '🩺', '🦴', '🚑', '🧒', '🩸', '🧪', '🔬', '⚡', '🌬️', '🦷', '👁️', '🧬', '🩻', '⭐'];
 
-const SEED = [
-  ['Respiratory Medicine', '🫁'], ['Cardiovascular Anaesthesia', '❤️'], ['Respiratory System Management', '🌬️'],
-  ['Neuro Anaesthesia', '🧠'], ['General Anaesthesia', '😴'], ['Obs & Gynae Anaesthesia', '🤰'],
-  ['Pain Medicine', '💊'], ['Procedural Sedation', '💉'], ['ICU', '🏥'],
-  ['Regional Anaesthesia & Blocks', '🎯', ['Upper Limb Blocks', 'Lower Limb Blocks']],
-  ['Perioperative Medicine', '📋'], ['Geriatric Anaesthesia', '🧓'], ['Extremes of Age Anaesthesia', '🍼'],
-  ['Trauma, Burn & Poisoning', '🔥'], ['Cardiothoracic Anaesthesia', '🩺'], ['Orthopaedic Anaesthesia', '🦴'],
-  ['Emergency', '🚑'], ['Paediatric Anaesthesia', '🧒']
+const TAGS = [
+  { id: 'hy', name: 'High-yield', color: '#E0A100' },
+  { id: 'vi', name: 'Very important', color: '#EF5B5B' },
+  { id: 'mk', name: 'Must-know', color: '#F08A24' },
+  { id: 'hard', name: 'Hard topic', color: '#A24BD8' },
+  { id: 'viva', name: 'Viva', color: '#3B6FE0' },
+  { id: 'wr', name: 'Written', color: '#14A3A3' },
+  { id: 'ospe', name: 'OSPE', color: '#2FA36B' },
+  { id: 'lc', name: 'Long case', color: '#E0489F' },
+  { id: 'sc', name: 'Short case', color: '#64748B' }
 ];
+const REVS = [
+  { id: 'night', name: 'Night before exam', short: 'Night before', color: '#6B5CE7' },
+  { id: 'week', name: '1 week before exam', short: '1 week before', color: '#F08A24' },
+  { id: 'month', name: 'Last month', short: 'Last month', color: '#1F9BD1' }
+];
+const allTags = () => TAGS.concat(ST.customTags || []);
+const tagById = id => allTags().find(t => t.id === id);
+const revById = id => REVS.find(r => r.id === id);
+const ptag = (label, color, icon) => `<span class="ptag" style="--t:${color}">${icon ? ic(icon, 12) : ''}${esc(label)}</span>`;
+const qaPills = q => (q.rev || []).map(revById).filter(Boolean).map(r => ptag(r.short, r.color, 'flag')).join('') +
+  (q.tags || []).map(tagById).filter(Boolean).map(t => ptag(t.name, t.color)).join('');
+
+const SEED = [
+  ['Neuro Anaesthesia', '🧠'], ['Obstetric & Gynae Anaesthesia', '🤰'], ['Cardiothoracic Anaesthesia', '🫀'],
+  ['Paediatric Anaesthesia', '🧒'], ['Emergency and Trauma Anaesthesia', '🚑'], ['Burn & Poisoning', '🔥'],
+  ['Orthopaedic Anaesthesia', '🦴'], ['Eye, ENT', '👁️'], ['Genitourinary Anaesthesia', '💧'],
+  ['Obesity', '⚖️'], ['Liver Disease', '🧪'], ['Day Case Anaesthesia', '🏠'],
+  ['Endocrine System', '🦋'], ['Transplant Anaesthesia', '🔄'], ['Geriatric Anaesthesia', '🧓'],
+  ['Intercurrent disease and anaesthesia', '📋'], ['ICU', '🏥'], ['General Anaesthesia', '😴'],
+  ['Regional Anaesthesia & Block', '🎯'], ['Data, statistics', '📊'], ['Pharmacology', '💊'],
+  ['Procedural Sedation', '💉'], ['Critical incidents', '⚠️'], ['Complications during anaesthesia', '🚨'],
+  ['Pain Medicine', '😣'], ['Quality and safety in anaesthesia', '✅'],
+  ['Metabolism, stress responses and thermoregulation', '🌡️'], ['Nausea and vomiting', '🤢'],
+  ['Cardiovascular system', '❤️'], ['Respiratory system', '🫁'], ['Renal system', '🫘'],
+  ['Fluid, electrolyte and acid–base balance', '⚗️'], ['Physics', '⚡'], ['Applied Physiology', '🔬']
+];
+/* The first starter list (Phase 1 and 2). Used once, to clear these out if they are still empty. */
+const OLD_DEFAULTS = ['Respiratory Medicine', 'Cardiovascular Anaesthesia', 'Respiratory System Management', 'Neuro Anaesthesia', 'General Anaesthesia',
+  'Obs & Gynae Anaesthesia', 'Pain Medicine', 'Procedural Sedation', 'ICU', 'Regional Anaesthesia & Blocks', 'Perioperative Medicine', 'Geriatric Anaesthesia',
+  'Extremes of Age Anaesthesia', 'Trauma, Burn & Poisoning', 'Cardiothoracic Anaesthesia', 'Orthopaedic Anaesthesia', 'Emergency', 'Paediatric Anaesthesia'];
+const OLD_TOPICS = ['Upper Limb Blocks', 'Lower Limb Blocks'];
+const normName = x => String(x).toLowerCase().replace(/[^a-z0-9\u0980-\u09ff]+/g, '');
+
 async function seed() {
-  const now = Date.now(); const sys = [], nodes = [];
-  SEED.forEach((s, i) => {
-    const rec = { id: uid(), name: s[0], emoji: s[1], color: COLORS[i % COLORS.length], order: i, createdAt: now + i };
-    sys.push(rec);
-    (s[2] || []).forEach((t, j) => nodes.push({ id: uid(), systemId: rec.id, parentId: null, name: t, order: j, createdAt: now + j }));
+  const now = Date.now();
+  const sys = SEED.map((s, i) => ({ id: uid(), name: s[0], emoji: s[1], color: COLORS[i % COLORS.length], order: i, createdAt: now + i }));
+  S.systems = sys; S.nodes = []; S.qas = [];
+  await commit({ systems: sys });
+  ST.seeded = true; ST.sysListV = 2; saveST();
+}
+
+/* One-time switch to the new system list. Nothing with content is ever deleted:
+   only old starter systems that are still empty are removed. */
+async function migrateSystems() {
+  if ((ST.sysListV || 0) >= 2) return;
+  const qBySys = new Map(); S.qas.forEach(q => qBySys.set(q.systemId, (qBySys.get(q.systemId) || 0) + 1));
+  const wanted = new Set(SEED.map(x => normName(x[0]))), oldNames = new Set(OLD_DEFAULTS.map(normName));
+  const remove = S.systems.filter(s => {
+    const k = normName(s.name);
+    if (wanted.has(k) || !oldNames.has(k) || qBySys.get(s.id)) return false;
+    const nodes = S.nodes.filter(n => n.systemId === s.id);
+    return nodes.every(n => !n.parentId && OLD_TOPICS.includes(n.name) && !S.nodes.some(x => x.parentId === n.id));
   });
-  S.systems = sys; S.nodes = nodes; S.qas = [];
-  await commit({ systems: sys, nodes });
-  ST.seeded = true; saveST();
+  const rmIds = new Set(remove.map(x => x.id)), rmNodes = S.nodes.filter(n => rmIds.has(n.systemId));
+  S.systems = S.systems.filter(x => !rmIds.has(x.id)); S.nodes = S.nodes.filter(n => !rmIds.has(n.systemId));
+  const now = Date.now(), byName = new Map(S.systems.map(x => [normName(x.name), x])), placed = new Set(), added = [];
+  SEED.forEach((e, i) => {
+    let x = byName.get(normName(e[0]));
+    if (!x) { x = { id: uid(), name: e[0], emoji: e[1], color: COLORS[i % COLORS.length], order: i, createdAt: now + i }; S.systems.push(x); added.push(x); }
+    x.order = i; placed.add(x.id);
+  });
+  S.systems.filter(x => !placed.has(x.id)).sort(byOrder).forEach((x, j) => { x.order = SEED.length + j; });
+  await commit({ systems: S.systems }, { systems: [...rmIds], nodes: rmNodes.map(n => n.id) });
+  ST.sysListV = 2; ST.seeded = true; saveST();
+  if (added.length || remove.length) toast(`Systems updated: ${added.length} added, ${remove.length} empty starter ${remove.length === 1 ? 'system' : 'systems'} removed`);
 }
 
 /* Reorder one item inside its sibling list and persist only what changed. */
@@ -356,7 +422,8 @@ function openDialog({ title, html, primary = 'Save', secondary = 'Cancel', dange
     d.showModal();
     if (onOpen) onOpen(d);
     const f = $('[autofocus]', d) || $('input[type=text],textarea,select', d) || $('.dlg-foot .btn', d);
-    if (f) f.focus();
+    if (f) f.focus({ preventScroll: true });
+    const box = $('.dlg-in', d); if (box) box.scrollTop = 0;
   });
 }
 const confirmDlg = (title, text, primary = 'Delete') => openDialog({ title, html: `<p>${text}</p>`, primary, danger: true });
@@ -397,6 +464,52 @@ async function dlgMove(qa) {
       ss.addEventListener('change', fill); fill();
     },
     collect: d => $('[name=node]', d).value || false
+  });
+}
+
+const tglChip = (kind, id, name, color, checked, removable) =>
+  `<span class="tgl-wrap"><label class="tgl" style="--c:${color}"><input type="checkbox" data-kind="${kind}" value="${esc(id)}" ${checked ? 'checked' : ''}><span>${kind === 'rev' ? ic('flag', 13) : ''}${esc(name)}</span></label>${removable ? `<button type="button" class="tgl-x" data-deltag="${esc(id)}" aria-label="Delete tag ${esc(name)}" title="Delete this tag">${ic('close', 13)}</button>` : ''}</span>`;
+const dlgNewTag = () => openDialog({
+  title: 'New tag', primary: 'Add tag',
+  html: `<label class="fld">Tag name<input type="text" name="name" required maxlength="30" autofocus placeholder="e.g. Last-minute"></label>
+    <div class="fld">Colour<div class="swatches">${COLORS.map((c, i) => `<label style="--c:${c}"><input type="radio" name="color" value="${c}" ${i === 4 ? 'checked' : ''}><span></span></label>`).join('')}</div></div>`,
+  collect: d => {
+    const name = $('[name=name]', d).value.trim(); if (!name) return false;
+    if (allTags().some(t => t.name.toLowerCase() === name.toLowerCase())) { toast('A tag with that name already exists'); return false; }
+    return { id: 'c_' + uid().slice(0, 8), name, color: $('[name=color]:checked', d).value };
+  }
+});
+async function deleteCustomTag(id) {
+  const t = (ST.customTags || []).find(x => x.id === id); if (!t) return false;
+  const used = S.qas.filter(q => (q.tags || []).includes(id));
+  const ok = await confirmDlg(`Delete the tag ${t.name}?`, `It will be removed from ${plural(used.length, 'question')}.`);
+  if (!ok) return false;
+  used.forEach(q => { q.tags = q.tags.filter(x => x !== id); q.updatedAt = Date.now(); });
+  await save({ qas: used });
+  ST.customTags = ST.customTags.filter(x => x.id !== id); saveST();
+  IX.text.clear(); reindex(); render(true);
+  return true;
+}
+function dlgTags(cur) {
+  return openDialog({
+    title: 'Tags and revision', primary: 'Apply',
+    html: `<div class="fld">Revision list<div class="tgls">${REVS.map(r => tglChip('rev', r.id, r.name, r.color, (cur.rev || []).includes(r.id))).join('')}</div>
+        <span class="muted small" style="font-weight:400">Choose when you want to read this again. Every list is under Revision and tags.</span></div>
+      <div class="fld">Tags<div class="tgls" id="tgTags">${allTags().map(t => tglChip('tag', t.id, t.name, t.color, (cur.tags || []).includes(t.id), !TAGS.includes(t))).join('')}
+        <button type="button" class="chip add" id="tgNew">${ic('plus', 14)} New tag</button></div></div>`,
+    onOpen: d => {
+      d.addEventListener('click', async e => {
+        if (e.target.closest('#tgNew')) {
+          const t = await dlgNewTag(); if (!t) return;
+          ST.customTags.push(t); saveST();
+          $('#tgNew', d).insertAdjacentHTML('beforebegin', tglChip('tag', t.id, t.name, t.color, true, true));
+          return;
+        }
+        const x = e.target.closest('[data-deltag]');
+        if (x && await deleteCustomTag(x.dataset.deltag)) x.closest('.tgl-wrap').remove();
+      });
+    },
+    collect: d => ({ rev: $$('[data-kind=rev]:checked', d).map(x => x.value), tags: $$('[data-kind=tag]:checked', d).map(x => x.value) })
   });
 }
 
@@ -473,6 +586,7 @@ function parseRoute() {
   if (p[0] === 's' && p[1]) return { v: 'system', id: p[1] };
   if (p[0] === 'n' && p[1]) return { v: 'node', id: p[1], qa: p[2] };
   if (p[0] === 'search') return { v: 'search', q: decodeURIComponent(p.slice(1).join('/')) };
+  if (p[0] === 'study') return { v: 'study', key: p[1] };
   return { v: 'home' };
 }
 function ensureExpanded(r) {
@@ -511,10 +625,12 @@ function viewHome() {
       <div><h1>FCPS Book</h1><p class="tally">${plural(S.systems.length, 'system')}, ${plural(nT, 'topic')}, ${plural(nQ, 'question')}</p></div>
       <div class="head-actions">
         ${last ? `<a class="btn resume" href="#/n/${last.id}">${ic('book', 16)}<span class="t">Continue: ${esc(last.name)}</span></a>` : ''}
+        <span class="seg" role="group" aria-label="Dashboard text size"><button type="button" data-act="dash-down" aria-label="Smaller dashboard text" title="Smaller dashboard text">A−</button><button type="button" data-act="dash-up" aria-label="Larger dashboard text" title="Larger dashboard text">A+</button></span>
         <button class="btn primary" data-act="add-system">${ic('plus', 16)} Add system</button>
       </div>
     </div>
     ${banner}
+    ${S.systems.length ? studyRow() : ''}
     ${S.systems.length ? `<div class="grid" id="grid">${S.systems.map(sysCard).join('')}
       <button class="card add" data-act="add-system">${ic('plus', 18)} Add system</button></div>
       <p class="hint">Drag a card to reorder, or use the ⋮ menu on any card.</p>`
@@ -548,13 +664,19 @@ function viewSystem(s) {
   </section>`;
 }
 
-function qaCard(q, i) {
-  const closed = collapsed.has(q.id);
-  return `<article class="qa${closed ? ' closed' : ''}" id="qa-${q.id}" data-id="${q.id}">
+function qaCard(q, i, o = {}) {
+  const closed = collapsed.has(q.id), n = IX.node.get(q.nodeId), sys = IX.sys.get(q.systemId), pills = qaPills(q);
+  return `<article class="qa${closed ? ' closed' : ''}" id="qa-${q.id}" data-id="${q.id}" style="--c:${sys.color}">
     <header class="qa-head" data-act="toggle-qa" data-id="${q.id}">
       <span class="qa-n">${i + 1}</span>
-      <h3>${esc(q.q)}</h3>
+      <div class="qa-title">
+        ${o.path && n ? `<a class="qa-path" href="#/n/${n.id}/${q.id}">${esc(pathOf(n))}</a>` : ''}
+        <h3>${esc(q.q)}</h3>
+        ${pills ? `<div class="ptags">${pills}</div>` : ''}
+      </div>
       <span class="qa-tools">
+        ${o.rev ? `<button class="icon-btn" data-act="rev-remove" data-id="${q.id}" data-key="${o.rev}" aria-label="Done revising, remove from this list" title="Done revising: remove from this list">${ic('check', 18)}</button>` : ''}
+        <button class="icon-btn" data-act="qa-tags" data-id="${q.id}" aria-label="Tags and revision" title="Tags and revision">${ic('tag', 17)}</button>
         <button class="icon-btn" data-act="edit-qa" data-id="${q.id}" aria-label="Edit question" title="Edit">${ic('edit', 17)}</button>
         <button class="icon-btn" data-act="qa-menu" data-id="${q.id}" aria-label="More options" title="More">${ic('dots', 17)}</button>
         <span class="icon-btn chev" aria-hidden="true">${ic('down', 17)}</span>
@@ -586,8 +708,45 @@ function viewNode(n) {
     </div>
     ${qs.length ? `<div class="list-bar"><span>${plural(qs.length, 'question')}</span>
         ${qs.length > 1 ? `<span><button class="btn small ghost" data-act="collapse-all">Collapse all</button> <button class="btn small ghost" data-act="expand-all">Expand all</button></span>` : ''}</div>
-      <div class="qa-list">${qs.map(qaCard).join('')}</div>`
+      <div class="qa-list">${qs.map((q, i) => qaCard(q, i)).join('')}</div>`
       : `<div class="empty" style="margin-top:20px"><p>No questions here yet.</p><button class="btn primary" data-act="new-qa" data-id="${n.id}">${ic('plus', 16)} New question</button></div>`}
+  </section>`;
+}
+
+function studyRow() {
+  const cnt = studyCounts();
+  const card = (href, color, icon, name, n) => `<a class="study-card" style="--c:${color}" href="${href}">${ic(icon, 20)}<span><b>${esc(name)}</b><small>${plural(n, 'question')}</small></span></a>`;
+  return `<div class="study-row" aria-label="Revision lists">${REVS.map(r => card('#/study/' + r.id, r.color, 'flag', r.short, cnt[r.id] || 0)).join('')}${card('#/study/hard', '#A24BD8', 'tag', 'Hard topics', cnt.hard || 0)}</div>`;
+}
+function studyCounts() {
+  const c = {};
+  S.qas.forEach(q => { (q.rev || []).forEach(k => { c[k] = (c[k] || 0) + 1; }); (q.tags || []).forEach(k => { c[k] = (c[k] || 0) + 1; }); });
+  return c;
+}
+function viewStudy(key) {
+  const isRev = !!revById(key), meta = isRev ? revById(key) : tagById(key);
+  const cur = meta ? key : 'night', m = meta || REVS[0], rev = meta ? isRev : true;
+  const cnt = studyCounts();
+  const chip = (k, label, color, icon) => `<a class="chip${k === cur ? ' on' : ''}" style="--c:${color}" href="#/study/${k}">${icon ? ic(icon, 13) : ''} ${esc(label)} <i>${cnt[k] || 0}</i></a>`;
+  const items = S.qas.filter(q => IX.node.get(q.nodeId) && (rev ? (q.rev || []) : (q.tags || [])).includes(cur));
+  const k4 = q => { const n = IX.node.get(q.nodeId), s = IX.sys.get(q.systemId), top = n.parentId ? IX.node.get(n.parentId) : n; return [s.order, top.order, n.parentId ? n.order : -1, q.order]; };
+  items.sort((a, b) => { const x = k4(a), y = k4(b); for (let i = 0; i < 4; i++) if (x[i] !== y[i]) return x[i] - y[i]; return 0; });
+  let list = '', lastSys = null;
+  items.forEach((q, i) => {
+    if (q.systemId !== lastSys) { const s = IX.sys.get(q.systemId); lastSys = q.systemId; list += `<h2 class="group-title sysgroup" style="--c:${s.color}"><span class="em">${esc(s.emoji)}</span> ${esc(s.name)}</h2>`; }
+    list += qaCard(q, i, { path: true, rev: rev ? cur : '' });
+  });
+  return `<section style="--c:${m.color}">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="#/">All systems</a>${sep}<span>Revision and tags</span></nav>
+    <div class="page-head"><div class="grow"><div class="bar-accent"></div><h1>${esc(m.name)}</h1>
+      <p class="sub">${plural(items.length, 'question')}. ${rev ? 'Tap the tick on a question when you have finished revising it, and it leaves this list.' : 'Every question with this tag, grouped by system.'}</p></div></div>
+    <div class="fld-label">Revision lists</div>
+    <div class="chips">${REVS.map(r => chip(r.id, r.short, r.color, 'flag')).join('')}</div>
+    <div class="fld-label">Tags</div>
+    <div class="chips">${allTags().map(t => chip(t.id, t.name, t.color)).join('')}</div>
+    ${items.length ? `<div class="list-bar"><span></span>${items.length > 1 ? `<span><button class="btn small ghost" data-act="collapse-all">Collapse all</button> <button class="btn small ghost" data-act="expand-all">Expand all</button></span>` : ''}</div>
+      <div class="qa-list">${list}</div>`
+      : `<div class="empty" style="margin-top:22px"><p>${rev ? 'Nothing in this list yet. Open any question and use its tag button to add it here.' : 'No questions have this tag yet. Use the tag button on any question to add it.'}</p></div>`}
   </section>`;
 }
 
@@ -626,7 +785,7 @@ function viewSearch(query) {
     html += `<h2 class="group-title">Questions</h2><div class="results">` + shown.map(([q, t]) => {
       const n = IX.node.get(q.nodeId); if (!n) return '';
       const sn = snip(t);
-      return `<a class="res" style="--c:${IX.sys.get(q.systemId).color}" href="#/n/${n.id}/${q.id}"><div class="path">${esc(pathOf(n))}</div><div class="rq">${hl(q.q, terms)}</div>${sn ? `<div class="snip">${hl(sn, terms)}</div>` : ''}</a>`;
+      return `<a class="res" style="--c:${IX.sys.get(q.systemId).color}" href="#/n/${n.id}/${q.id}"><div class="path">${esc(pathOf(n))}</div><div class="rq">${hl(q.q, terms)}</div>${sn ? `<div class="snip">${hl(sn, terms)}</div>` : ''}${qaPills(q) ? `<div class="ptags">${qaPills(q)}</div>` : ''}</a>`;
     }).join('') + `</div>` + (qHits.length > shown.length ? `<p class="hint">Showing the first ${shown.length}. Add another word to narrow the search.</p>` : '');
   }
   if (!qHits.length && !sysHits.length && !nodeHits.length) html += `<div class="empty"><p>Nothing found. Try fewer or different words.</p></div>`;
@@ -643,7 +802,8 @@ function renderTree() {
       <button class="caret ${hasKids ? (open(id) ? 'open' : '') : 'none'}" data-act="tog" data-id="${id}" aria-label="${open(id) ? 'Collapse' : 'Expand'}" ${hasKids ? '' : 'tabindex="-1"'}>${ic('right', 15)}</button>
       <a class="tname" href="${href}">${emoji ? `<span class="em">${esc(emoji)}</span>` : ''}<span class="t">${esc(name)}</span></a>
       <span class="tcount">${count || ''}</span></div>`;
-  let h = `<a class="tree-home${r.v === 'home' ? ' on' : ''}" href="#/">${ic('home', 17)} All systems</a>`;
+  let h = `<a class="tree-home${r.v === 'home' ? ' on' : ''}" href="#/">${ic('home', 17)} All systems</a>` +
+    `<a class="tree-home${r.v === 'study' ? ' on' : ''}" href="#/study/night">${ic('flag', 17)} Revision and tags</a>`;
   if (!S.systems.length) h += `<p class="tree-empty">Your systems will appear here.</p>`;
   for (const s of S.systems) {
     const tops = topicsOf(s.id);
@@ -679,6 +839,8 @@ function render(keepScroll) {
   } else if (r.v === 'search') {
     html = viewSearch(r.q); title = 'Search';
     const qi = $('#q'); if (qi && document.activeElement !== qi) qi.value = r.q;
+  } else if (r.v === 'study') {
+    html = viewStudy(r.key); title = 'Revision and tags';
   } else html = viewHome();
   if (r.v !== 'search') { const qi = $('#q'); if (qi && document.activeElement !== qi) qi.value = ''; }
   main.innerHTML = html;
@@ -713,7 +875,8 @@ function openEditor(nodeId, qa) {
         <button type="button" class="btn primary" data-e="save">${qa ? 'Save changes' : 'Save'}</button>
       </div>
     </div>
-    <div class="ed-q"><label for="edQ">Question</label><textarea id="edQ" rows="2" placeholder="Type the question"></textarea></div>
+    <div class="ed-q"><label for="edQ">Question</label><textarea id="edQ" rows="2" placeholder="Type the question"></textarea>
+      <div class="ed-tags"><button type="button" class="btn small" data-e="tags">${ic('tag', 15)} Tags and revision</button><span class="ptags" id="edPills"></span></div></div>
     <div class="tb" role="toolbar" aria-label="Formatting">
       <select data-sel="font" aria-label="Font"><option value="" selected disabled>Font</option>${FONTS.map(f => `<option value="${f.name}">${f.name}</option>`).join('')}</select>
       <select data-sel="size" aria-label="Font size"><option value="" selected disabled>Size</option>${SIZES.map(s => `<option value="${s}">${s}</option>`).join('')}</select>
@@ -734,8 +897,11 @@ function openEditor(nodeId, qa) {
   document.body.appendChild(d);
   const ed = $('#edA', d), eq = $('#edQ', d), pal = $('.pal', d);
   eq.value = qa ? qa.q : ''; ed.innerHTML = qa ? qa.a : '';
-  const snap = () => eq.value + '\u0000' + ed.innerHTML;
+  let edTags = ((qa && qa.tags) || []).slice(), edRev = ((qa && qa.rev) || []).slice();
+  const snap = () => eq.value + '\u0000' + ed.innerHTML + '\u0000' + edTags.join(',') + '|' + edRev.join(',');
+  const showPills = () => { $('#edPills', d).innerHTML = qaPills({ tags: edTags, rev: edRev }) || '<span class="muted small">None yet</span>'; };
   let base = snap();
+  showPills();
   const fit = () => { eq.style.height = 'auto'; eq.style.height = Math.min(eq.scrollHeight + 2, 200) + 'px'; };
   eq.addEventListener('input', fit);
 
@@ -796,7 +962,11 @@ function openEditor(nodeId, qa) {
     const pb = e.target.closest('[data-pal]');
     if (pb) { if (!pal.hidden && pal.dataset.kind === pb.dataset.pal) pal.hidden = true; else showPal(pb, pb.dataset.pal); return; }
     const a = e.target.closest('[data-e]');
-    if (a) { if (a.dataset.e === 'cancel') tryClose(); else doSave(a.dataset.e === 'next'); }
+    if (a) {
+      if (a.dataset.e === 'cancel') tryClose();
+      else if (a.dataset.e === 'tags') dlgTags({ tags: edTags, rev: edRev }).then(v => { if (v) { edTags = v.tags; edRev = v.rev; showPills(); } });
+      else doSave(a.dataset.e === 'next');
+    }
   });
   d.addEventListener('change', e => {
     const s = e.target.closest('[data-sel]'); if (!s || !s.value) return;
@@ -830,16 +1000,16 @@ function openEditor(nodeId, qa) {
     if (!stripHtml(a)) a = '';
     let rec = qa;
     try {
-      if (qa) { qa.q = qv; qa.a = a; qa.updatedAt = Date.now(); await save({ qas: [qa] }); }
+      if (qa) { qa.q = qv; qa.a = a; qa.tags = edTags.slice(); qa.rev = edRev.slice(); qa.updatedAt = Date.now(); await save({ qas: [qa] }); }
       else {
         const sibs = qasOf(nodeId);
-        rec = { id: uid(), systemId: n.systemId, nodeId, q: qv, a, order: sibs.length ? Math.max(...sibs.map(x => x.order)) + 1 : 0, createdAt: Date.now(), updatedAt: Date.now() };
+        rec = { id: uid(), systemId: n.systemId, nodeId, q: qv, a, tags: edTags.slice(), rev: edRev.slice(), order: sibs.length ? Math.max(...sibs.map(x => x.order)) + 1 : 0, createdAt: Date.now(), updatedAt: Date.now() };
         S.qas.push(rec); await save({ qas: [rec] });
       }
     } catch (e) { return; }
     reindex(); flashId = rec.id;
     if (next) {
-      eq.value = ''; ed.innerHTML = ''; base = snap(); fit(); eq.focus(); render(true); toast('Saved. Ready for the next question.');
+      eq.value = ''; ed.innerHTML = ''; edTags = []; edRev = []; showPills(); base = snap(); fit(); eq.focus(); render(true); toast('Saved. Ready for the next question.');
     } else { base = snap(); cleanup(); render(true); toast('Saved'); }
   }
   d.showModal(); fit();
@@ -848,7 +1018,7 @@ function openEditor(nodeId, qa) {
 
 /* ============================== settings + backup ============================== */
 function exportBackup() {
-  const data = { app: 'fcps-book', version: 1, exportedAt: new Date().toISOString(), settings: { theme: ST.theme, uiFont: ST.uiFont, noteFont: ST.noteFont, noteSize: ST.noteSize }, systems: S.systems, nodes: S.nodes, qas: S.qas };
+  const data = { app: 'fcps-book', version: 1, exportedAt: new Date().toISOString(), settings: { theme: ST.theme, uiFont: ST.uiFont, noteFont: ST.noteFont, noteSize: ST.noteSize, customTags: ST.customTags || [] }, systems: S.systems, nodes: S.nodes, qas: S.qas };
   const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob); a.download = `fcps-book-backup-${new Date().toISOString().slice(0, 10)}.json`;
@@ -873,7 +1043,7 @@ async function importBackup(data) {
   const systems = data.systems.filter(s => sysIds.has(s.id)).map(s => ({ id: s.id, name: String(s.name), emoji: s.emoji || '📚', color: SAFE_COLOR.test(s.color || '') ? s.color : COLORS[0], order: +s.order || 0, createdAt: s.createdAt || Date.now() }));
   const nodes = data.nodes.filter(n => n && n.id && n.name && sysIds.has(n.systemId)).map(n => ({ id: n.id, systemId: n.systemId, parentId: n.parentId || null, name: String(n.name), order: +n.order || 0, createdAt: n.createdAt || Date.now() }));
   const nodeIds = new Set(nodes.map(n => n.id));
-  const qas = data.qas.filter(q => q && q.id && nodeIds.has(q.nodeId) && sysIds.has(q.systemId)).map(q => ({ id: q.id, systemId: q.systemId, nodeId: q.nodeId, q: String(q.q || ''), a: sanitize(q.a || '', false), order: +q.order || 0, createdAt: q.createdAt || Date.now(), updatedAt: q.updatedAt || Date.now() }));
+  const qas = data.qas.filter(q => q && q.id && nodeIds.has(q.nodeId) && sysIds.has(q.systemId)).map(q => ({ id: q.id, systemId: q.systemId, nodeId: q.nodeId, q: String(q.q || ''), a: sanitize(q.a || '', false), tags: Array.isArray(q.tags) ? q.tags.filter(x => typeof x === 'string').slice(0, 30) : [], rev: Array.isArray(q.rev) ? q.rev.filter(revById) : [], order: +q.order || 0, createdAt: q.createdAt || Date.now(), updatedAt: q.updatedAt || Date.now() }));
   const mode = await openDialog({
     title: 'Restore from backup', primary: 'Restore', wide: false,
     html: `<p>This file has ${plural(systems.length, 'system')}, ${plural(nodes.length, 'topic/subtopic')} and ${plural(qas.length, 'question')}.</p>
@@ -882,6 +1052,10 @@ async function importBackup(data) {
     collect: d => $('[name=mode]:checked', d).value
   });
   if (!mode) throw new Error('cancelled');
+  const inc = ((data.settings && data.settings.customTags) || []).filter(t => t && t.id && t.name && SAFE_COLOR.test(t.color || '')).map(t => ({ id: String(t.id), name: String(t.name), color: t.color }));
+  if (mode === 'replace') ST.customTags = inc;
+  else inc.forEach(t => { if (!allTags().some(x => x.id === t.id)) ST.customTags.push(t); });
+  saveST();
   if (mode === 'replace') {
     await commit({ systems, nodes, qas }, { systems: S.systems.map(x => x.id), nodes: S.nodes.map(x => x.id), qas: S.qas.map(x => x.id) });
     S.systems = systems; S.nodes = nodes; S.qas = qas;
@@ -899,10 +1073,14 @@ async function openSettings() {
   let est = '';
   try { if (navigator.storage && navigator.storage.estimate) { const e = await navigator.storage.estimate(); est = `${(e.usage / 1048576).toFixed(1)} MB used`; } } catch (e) {}
   let persisted = null; try { if (navigator.storage && navigator.storage.persisted) persisted = await navigator.storage.persisted(); } catch (e) {}
+  const themeBtns = list => list.map(t => `<button type="button" class="theme-btn${ST.theme === t.id ? ' on' : ''}" data-tid="${t.id}"><span class="sw"><i style="background:${t.c[0]}"></i><i style="background:${t.c[1]}"></i><i style="background:${t.c[2]}"></i></span><span class="n">${t.name}</span></button>`).join('');
   const last = ST.lastBackup ? new Date(ST.lastBackup).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : 'never';
   await openDialog({
     title: 'Settings', primary: 'Done', secondary: null, wide: true,
-    html: `<div class="set-sec"><h3>Theme</h3><div class="theme-grid">${THEMES.map(t => `<button type="button" class="theme-btn${ST.theme === t.id ? ' on' : ''}" data-theme="${t.id}"><span class="sw"><i style="background:${t.c[0]}"></i><i style="background:${t.c[1]}"></i><i style="background:${t.c[2]}"></i></span><span class="n">${t.name}</span></button>`).join('')}</div></div>
+    html: `<div class="set-sec"><h3>Light themes</h3><div class="theme-grid">${themeBtns(THEMES.filter(t => !t.night))}</div>
+        <h3 style="margin-top:8px">Night themes</h3><div class="theme-grid">${themeBtns(THEMES.filter(t => t.night))}</div></div>
+      <div class="set-sec"><h3>Dashboard text size</h3><div class="range-row"><span class="small">Small</span><input type="range" id="dsRange" min="11" max="22" step="1" value="${ST.dashSize || 17}" aria-label="Dashboard text size"><span class="small">Large</span></div>
+        <p class="muted small">Smaller text fits more systems on screen. You can also use the A− and A+ buttons on the dashboard.</p></div>
       <div class="set-sec"><h3>App font</h3><div class="font-grid" id="fgUi">${fontGrid('uiFont')}</div></div>
       <div class="set-sec"><h3>Answer font</h3><div class="font-grid" id="fgNote">${fontGrid('noteFont')}</div>
         <div class="range-row"><span class="small">Size</span><input type="range" id="szRange" min="14" max="26" step="1" value="${ST.noteSize}" aria-label="Answer text size"><b id="szVal">${ST.noteSize}px</b></div></div>
@@ -913,12 +1091,13 @@ async function openSettings() {
     onOpen: d => {
       d.addEventListener('click', e => {
         const t = e.target.closest('.theme-btn');
-        if (t) { ST.theme = t.dataset.theme; saveST(); applyLook(); $$('.theme-btn', d).forEach(b => b.classList.toggle('on', b === t)); return; }
+        if (t) { ST.theme = t.dataset.tid; saveST(); applyLook(); $$('.theme-btn', d).forEach(b => b.classList.toggle('on', b === t)); return; }
         const f = e.target.closest('.font-btn');
         if (f) { ST[f.dataset.font] = f.dataset.id; saveST(); applyLook(); $$(`[data-font="${f.dataset.font}"]`, d).forEach(b => b.classList.toggle('on', b === f)); return; }
         if (e.target.closest('#bkExport')) exportBackup();
         if (e.target.closest('#bkImport')) { d.close(); pickBackup(); }
       });
+      $('#dsRange', d).addEventListener('input', e => { ST.dashSize = +e.target.value; saveST(); applyLook(); });
       $('#szRange', d).addEventListener('input', e => { ST.noteSize = +e.target.value; $('#szVal', d).textContent = ST.noteSize + 'px'; saveST(); applyLook(); });
     }
   });
@@ -935,6 +1114,20 @@ const ACT = {
   'collapse-all': () => { $$('.qa').forEach(a => { collapsed.add(a.dataset.id); a.classList.add('closed'); }); },
   'expand-all': () => { collapsed.clear(); $$('.qa').forEach(a => a.classList.remove('closed')); },
   'backup-now': () => exportBackup(),
+  'dash-down': () => { ST.dashSize = Math.max(11, (ST.dashSize || 17) - 1); saveST(); applyLook(); },
+  'dash-up': () => { ST.dashSize = Math.min(22, (ST.dashSize || 17) + 1); saveST(); applyLook(); },
+  'qa-tags': async el => {
+    const q = S.qas.find(x => x.id === el.dataset.id); if (!q) return;
+    const v = await dlgTags({ tags: q.tags || [], rev: q.rev || [] }); if (!v) return;
+    q.tags = v.tags; q.rev = v.rev; q.updatedAt = Date.now();
+    await save({ qas: [q] }); reindex(); render(true);
+  },
+  'rev-remove': async el => {
+    const q = S.qas.find(x => x.id === el.dataset.id), key = el.dataset.key; if (!q) return;
+    q.rev = (q.rev || []).filter(x => x !== key); q.updatedAt = Date.now();
+    await save({ qas: [q] }); reindex(); render(true);
+    toast('Removed from the list', { undo: async () => { q.rev = (q.rev || []).concat(key); q.updatedAt = Date.now(); await save({ qas: [q] }); reindex(); render(true); } });
+  },
   'tog': el => {
     const id = el.dataset.id, i = ST.expanded.indexOf(id);
     if (i > -1) ST.expanded.splice(i, 1); else ST.expanded.push(id);
@@ -962,8 +1155,9 @@ const ACT = {
     const q = S.qas.find(x => x.id === el.dataset.id);
     openMenu(el, [
       { label: 'Edit', icon: 'edit', run: () => openEditor(q.nodeId, q) },
+      { label: 'Tags and revision', icon: 'tag', run: () => ACT['qa-tags']({ dataset: { id: q.id } }) },
       { label: 'Move to another topic', icon: 'move', run: () => moveQa(q.id) },
-      '-', ...orderItems('qas', qasOf(q.nodeId), q.id, false), '-',
+      '-', ...(parseRoute().v === 'node' ? [...orderItems('qas', qasOf(q.nodeId), q.id, false), '-'] : []),
       { label: 'Delete question', icon: 'trash', danger: true, run: () => deleteQa(q.id) }
     ]);
   }
@@ -977,8 +1171,8 @@ function wire() {
   $('#kbdHint').textContent = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent) ? '⌘K' : 'Ctrl K';
 
   document.addEventListener('click', e => {
-    const el = e.target.closest('[data-act]');
-    if (el) { e.preventDefault(); const f = ACT[el.dataset.act]; if (f) f(el, e); return; }
+    const el = e.target.closest('[data-act]'), link = e.target.closest('a[href]');
+    if (el && !(link && link !== el && el.contains(link))) { e.preventDefault(); const f = ACT[el.dataset.act]; if (f) f(el, e); return; }
     const card = e.target.closest('.card.sys');
     if (card) location.hash = '#/s/' + card.dataset.id;
   });
@@ -1025,7 +1219,7 @@ async function start() {
   try { db = await openDB(); }
   catch (e) { $('#main').innerHTML = '<div class="empty"><p><b>Storage is not available.</b> Open this app in a normal (not private) browser window.</p></div>'; return; }
   [S.systems, S.nodes, S.qas] = await Promise.all(STORES.map(readAll));
-  if (!S.systems.length && !ST.seeded) await seed();
+  if (!S.systems.length && !ST.seeded) await seed(); else await migrateSystems();
   reindex();
   ensureExpanded(parseRoute());
   render();
