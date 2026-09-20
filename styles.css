@@ -397,6 +397,12 @@ select.sel { height: 36px; border-radius: 10px; border: 1px solid var(--line); b
 .imp-row select.sel { max-width: 250px; }
 .imp-sum { margin: 6px 0 14px; padding-left: 20px; color: var(--muted); }
 
+
+/* ---------- question header: title first, details lighter (phase 4.2) ---------- */
+.qa-head h3 .q1, .fc-q .q1 { display: block; }
+.qa-head h3 .qrest { display: block; margin-top: 6px; font-size: .9em; font-weight: 400; line-height: 1.5; }
+.fc-q .qrest { display: block; margin-top: 12px; font-size: .68em; font-weight: 400; line-height: 1.5; }
+
 /* ---------- small screens ---------- */
 @media (max-width: 899px) {
   .fc-q { font-size: 21px; }
@@ -417,11 +423,18 @@ select.sel { height: 36px; border-radius: 10px; border: 1px solid var(--line); b
   .grid { grid-template-columns: repeat(auto-fill, minmax(calc(var(--dash-size) * 13.5), 1fr)); gap: 12px; }
   .page-head h1 { font-size: 26px; }
   .topics { grid-template-columns: 1fr; }
-  .qa-body { padding-left: 20px; padding-right: 16px; }
+  .qa-head { flex-wrap: wrap; row-gap: 4px; padding: 12px 6px 12px 12px; }
+  .qa-n { order: 1; }
+  .qa-tools { order: 2; margin-left: auto; }
+  .qa-title { order: 3; flex: 0 0 100%; }
+  .qa-head h3 { font-size: 16px; }
+  .qa-body { padding: 14px 14px 18px; }
+  .qa-path { font-size: 12px; }
   dialog.editor[open] { width: 100vw; height: 100dvh; max-height: 100dvh; border-radius: 0; border: 0; margin: 0; inset: 0; }
   .editable { padding: 16px 16px 50px; }
   .tb select { max-width: 110px; }
 }
+@media (hover: none) { .fc .hint { display: none; } }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
 }

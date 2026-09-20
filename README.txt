@@ -1,4 +1,4 @@
-FCPS Book (version 4.1)
+FCPS Book (version 4.2)
 
 Upload all files to your GitHub repository (keep the folders fonts/ and icons/) and replace the old ones.
 The tools/ folder is only for reference and does not need to be uploaded.
@@ -13,6 +13,9 @@ What is new in version 4
   See tools/IMPORT-FORMAT.md. Attach it with your documents when you ask Claude to prepare an import file.
 
 - Shaded boxes and coloured left bars from imported documents are kept.
+
+- Better phone layout: on a phone the question title now spans the full width (buttons sit above it),
+  and the details of a question (vignette, parts a, b, c) are shown in normal weight under a bold title.
 
 First install: MacBook (Safari) File > Add to Dock. iPhone (Safari) Share > Add to Home Screen.
 Next update: change VERSION at the top of sw.js each time you upload new files.

@@ -1,16 +1,18 @@
-/* FCPS Book — Phase 4.1 (system sorting, sidebar finder, import from Claude-made files, shaded answer boxes)
+/* FCPS Book — Phase 4.2 (system sorting, sidebar finder, import from Claude-made files, shaded boxes, better phone layout)
  * System > Topic > Subtopic > Question & answer. Offline, stored in IndexedDB.
  */
 (() => {
 'use strict';
 
-const APP_VERSION = 'Phase 4.1';
+const APP_VERSION = 'Phase 4.2';
 
 /* ============================== utilities ============================== */
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const uid = () => (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : 'id' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+/* first line of a question = its title; the rest (vignette, parts) is shown lighter */
+const qHtml = q => { const t = String(q == null ? '' : q), i = t.indexOf('\n'); return i < 0 ? esc(t) : `<span class="q1">${esc(t.slice(0, i))}</span><span class="qrest">${esc(t.slice(i + 1))}</span>`; };
 const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
 const reEsc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const byOrder = (a, b) => (a.order - b.order) || ((a.createdAt || 0) - (b.createdAt || 0));
@@ -753,7 +755,7 @@ function qaCard(q, i, o = {}) {
       <span class="qa-n">${i + 1}</span>
       <div class="qa-title">
         ${o.path && n ? `<a class="qa-path" href="#/n/${n.id}/${q.id}">${esc(pathOf(n))}</a>` : ''}
-        <h3>${esc(q.q)}</h3>
+        <h3>${qHtml(q.q)}</h3>
         ${pills ? `<div class="ptags">${pills}</div>` : ''}
       </div>
       <span class="qa-tools">
@@ -927,7 +929,7 @@ function viewCards(r) {
   return `<section class="fc">${head}${bar}
     <div class="fc-card" style="--c:${sys.color}">
       <div class="fc-path">${esc(pathOf(n))}</div>${pills ? `<div class="ptags" style="margin:0 0 6px">${pills}</div>` : ''}
-      <h2 class="fc-q">${esc(q.q)}</h2>
+      <h2 class="fc-q">${qHtml(q.q)}</h2>
       ${FC.flip ? `<div class="fc-a rich">${q.a}</div>` : `<button class="btn primary big" data-act="fc-flip">Show answer</button>`}
     </div>
     ${FC.flip ? `<div class="fc-rate"><button class="btn danger big" data-act="fc-again">Again</button><button class="btn primary big" data-act="fc-know">Got it</button></div>` : ''}
