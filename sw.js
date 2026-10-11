@@ -1,5 +1,5 @@
 /* FCPS Book service worker. Change VERSION each time you upload new files. */
-const VERSION = 'cloud-1';
+const VERSION = 'cloud-2';
 const CACHE = 'fcps-book-' + VERSION;
 const CORE = [
   './', 'index.html', 'app.js', 'styles.css', 'fonts.css', 'cloud.js', 'cloud.css', 'firebase-config.js', 'manifest.json',

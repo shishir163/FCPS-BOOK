@@ -42,12 +42,21 @@ let me = null;                       // { uid, email, name, role, status, device
 let entered = false, claimNext = false, claiming = false, creating = false, pendingName = '', kickNote = '';
 let unsubUser = null, unsubContent = null, unsubUsers = null, userDocTimer = null, gotUserDoc = false;
 let usersList = [], firstServer = false;
+let expTimer = null, warned = false;
 let sync = 'idle';                   // idle | live | cached | saving | offline
 const lastDocs = new Map();          // 'store_id' -> central data
 const stash = new Map();             // items waiting for their parent to arrive
 let hidden = new Set(lsGet(K.hidden, []));
 const saveHidden = () => lsSet(K.hidden, [...hidden]);
 const isAdmin = () => !!(me && me.role === 'admin' && me.status === 'approved');
+
+/* Subscription: a member's access runs until expiresAt (ms). The admin never expires. */
+const DAY = 864e5;
+const PLAN_TXT = { '6m': '6 months', '1y': '1 year' };
+const expiredNow = () => !!(me && me.role !== 'admin' && !(me.expiresAt > Date.now()));
+const fmtDate = ms => { try { return new Date(ms).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }); } catch (e) { return ''; } };
+const addMonths = (base, n) => { const d = new Date(base); d.setMonth(d.getMonth() + n); return d.getTime(); };
+const daysLeft = ms => Math.ceil((ms - Date.now()) / DAY);
 
 /* ============================== watching the app's local writes ============================== */
 let ownDb = null;
@@ -285,6 +294,10 @@ async function enterApp() {
   try { await ownerCheck(); } catch (e) {}
   if (!entered) return;
   startContent(); startUsers(); mountBtn(); updateBtn(); hideGate();
+  if (me && me.role !== 'admin' && me.expiresAt && daysLeft(me.expiresAt) <= 14 && !warned) {
+    warned = true; const n = daysLeft(me.expiresAt);
+    toast(`Your subscription ends in ${n} day${n === 1 ? '' : 's'}. Contact the admin to renew.`);
+  }
 }
 function leaveApp() {
   entered = false; stopContent(); stopUsers(); lastDocs.clear();
@@ -305,14 +318,23 @@ function handleUserDoc(snap) {
   }
   creating = false;
   const d = snap.data();
-  me = { uid: u.uid, email: u.email || d.email || '', name: d.name || '', role: d.role === 'admin' ? 'admin' : 'user', status: d.status || 'pending', deviceId: d.deviceId || '' };
-  lsSet(K.session, { uid: me.uid, email: me.email, role: me.role, status: me.status });
-
+  me = { uid: u.uid, email: u.email || d.email || '', name: d.name || '', role: d.role === 'admin' ? 'admin' : 'user', status: d.status || 'pending', deviceId: d.deviceId || '',
+    plan: d.plan || '', expiresAt: Number(d.expiresAt) || 0 };
+  lsSet(K.session, { uid: me.uid, email: me.email, role: me.role, status: me.status, plan: me.plan, expiresAt: me.expiresAt });
+  route();
+  updateBtn();
+}
+/* Decide what this account sees: the book, a waiting / blocked / expired screen. Runs on every account change and when a subscription runs out. */
+function route() {
+  clearTimeout(expTimer);
+  if (!me || !auth || !auth.currentUser) return;
   if (me.status === 'approved') {
+    if (expiredNow()) { if (entered) leaveApp(); viewExpired(); return; }
     if (me.role !== 'admin') {
+      armExpiry();
       if (claimNext || !me.deviceId) {
         claimNext = false; claiming = true;
-        usersCol.doc(u.uid).update({ deviceId: DEV, deviceAt: firebase.firestore.FieldValue.serverTimestamp() })
+        usersCol.doc(me.uid).update({ deviceId: DEV, deviceAt: firebase.firestore.FieldValue.serverTimestamp() })
           .then(() => { claiming = false; }, () => { claiming = false; });
       } else if (me.deviceId !== DEV && !claiming) { kick('You were signed out because this account was opened on another device.'); return; }
     }
@@ -321,7 +343,12 @@ function handleUserDoc(snap) {
     if (entered) leaveApp();
     if (me.status === 'blocked') viewBlocked(); else viewPending();
   }
-  updateBtn();
+}
+/* Lock the book at the moment the subscription ends, even if the app is open at that time. */
+function armExpiry() {
+  clearTimeout(expTimer);
+  if (!me || me.role === 'admin' || me.status !== 'approved' || !(me.expiresAt > Date.now())) return;
+  expTimer = setTimeout(route, Math.min(me.expiresAt - Date.now() + 300, 2147483000));
 }
 function watchUser(user) {
   if (unsubUser) { unsubUser(); unsubUser = null; }
@@ -332,8 +359,8 @@ function watchUser(user) {
   userDocTimer = setTimeout(() => {
     const s = lsGet(K.session, null);
     if (!gotUserDoc && s && s.uid === user.uid && s.status === 'approved') {
-      me = { uid: s.uid, email: s.email, name: '', role: s.role === 'admin' ? 'admin' : 'user', status: 'approved', deviceId: DEV };
-      setSync('offline'); enterApp();
+      me = { uid: s.uid, email: s.email, name: '', role: s.role === 'admin' ? 'admin' : 'user', status: 'approved', deviceId: DEV, plan: s.plan || '', expiresAt: Number(s.expiresAt) || 0 };
+      setSync('offline'); route();
     }
   }, 5000);
 }
@@ -366,9 +393,20 @@ function hideGate() { const g = $('#cloudGate'); if (g) g.hidden = true; }
 const brand = '<div class="cg-brand"><span class="cg-mark">📚</span><b>FCPS Book</b></div>';
 function viewLoading(t) { gate(`<div class="cg-card cg-center">${brand}<div class="cg-spin" aria-hidden="true"></div><p class="cg-sub">${esc(t || 'Opening your book…')}</p></div>`); }
 function viewSetup(msg) { gate(`<div class="cg-card">${brand}<h1>Cloud is not set up yet</h1><p class="cg-sub">${esc(msg)}</p></div>`); }
+/* How to pay: written by the admin in firebase-config.js (window.FCPS_CONTACT). Shown on the waiting and expired screens. */
+const payNote = () => { const n = String(window.FCPS_CONTACT || '').trim(); return n ? `<p class="cg-pay">${esc(n)}</p>` : ''; };
 function viewPending() {
   const g = gate(`<div class="cg-card cg-center">${brand}<h1>Waiting for approval</h1>
-    <p class="cg-sub">Your account <b>${esc(me ? me.email : '')}</b> is created. The admin needs to approve it before you can open the book. This page opens by itself once you are approved.</p>
+    <p class="cg-sub">Your account <b>${esc(me ? me.email : '')}</b> is created. The admin approves it after your subscription payment, for 6 months or 1 year. This page opens by itself once you are approved.</p>
+    ${payNote()}
+    <div class="cg-row"><button class="btn" id="cgOut" type="button">Sign out</button></div></div>`);
+  $('#cgOut', g).onclick = () => auth.signOut();
+}
+function viewExpired() {
+  const g = gate(`<div class="cg-card cg-center">${brand}<h1>Subscription ended</h1>
+    <p class="cg-sub">Access for <b>${esc(me ? me.email : '')}</b> ended${me && me.expiresAt ? ' on <b>' + esc(fmtDate(me.expiresAt)) + '</b>' : ''}. To continue, renew with the admin. This page opens by itself once you are renewed.</p>
+    <p class="cg-sub small">Your own notes and changes are safe on this device and will be here when you return.</p>
+    ${payNote()}
     <div class="cg-row"><button class="btn" id="cgOut" type="button">Sign out</button></div></div>`);
   $('#cgOut', g).onclick = () => auth.signOut();
 }
@@ -461,6 +499,8 @@ function openAccount() {
     <div class="set-sec"><h3>Signed in</h3>
       <p><b>${esc(me.name || me.email)}</b><br><span class="muted small">${esc(me.email)} · ${admin ? 'Admin' : 'Member'}</span></p>
       <p class="muted small">Sync: <b id="cgSyncTxt"></b></p>
+      ${!admin && me.expiresAt ? `<p class="muted small">Subscription: <b>${esc(PLAN_TXT[me.plan] || 'Active')}</b> · valid until <b>${esc(fmtDate(me.expiresAt))}</b> (${daysLeft(me.expiresAt)} days left)</p>
+        ${daysLeft(me.expiresAt) <= 14 ? '<p class="cg-note">Your subscription ends soon. Contact the admin to renew.</p>' : ''}` : ''}
       ${admin ? '<p class="muted small">Everything you add, edit or delete here appears on all your devices and for every member.</p>'
         : '<p class="muted small">You can read the whole book and use it offline. Anything you write or change stays on this device only.</p>'}
     </div>
@@ -484,26 +524,33 @@ function renderUsers() {
   const when = u => { try { return u.createdAt && u.createdAt.toDate ? u.createdAt.toDate().toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : ''; } catch (e) { return ''; } };
   box.innerHTML = list.length ? list.map(u => {
     const self = me && u.id === me.uid, adm = u.role === 'admin';
-    const btn = (a, t, c) => `<button type="button" class="btn small ${c || ''}" data-u="${esc(u.id)}" data-a="${a}">${t}</button>`;
+    const btn = (a, t, c, plan) => `<button type="button" class="btn small ${c || ''}" data-u="${esc(u.id)}" data-a="${a}"${plan ? ` data-plan="${plan}"` : ''}>${t}</button>`;
+    const live = u.status === 'approved' && u.expiresAt > Date.now(), over = u.status === 'approved' && !adm && !live;
     let acts = '';
     if (!self && !adm) {
-      if (u.status === 'pending') acts = btn('approved', 'Approve', 'primary') + btn('blocked', 'Reject');
-      else if (u.status === 'approved') acts = btn('blocked', 'Block') + btn('pending', 'Set to waiting');
-      else acts = btn('approved', 'Approve', 'primary');
+      if (u.status === 'pending' || u.status === 'blocked') acts = btn('grant', 'Approve 6 months', 'primary', '6m') + btn('grant', 'Approve 1 year', 'primary', '1y') + (u.status === 'pending' ? btn('blocked', 'Reject') : '');
+      else acts = btn('grant', 'Renew +6 months', 'primary', '6m') + btn('grant', 'Renew +1 year', 'primary', '1y') + btn('blocked', 'Block') + btn('pending', 'Set to waiting');
       acts += btn('delete', 'Remove', 'danger');
     }
-    return `<div class="cg-user"><div class="cg-uinfo"><b>${esc(u.name || u.email)}</b><span class="muted small">${esc(u.email)}${when(u) ? ' · joined ' + esc(when(u)) : ''}</span></div>
-      <span class="cg-chip ${esc(u.status)}">${adm ? 'admin' : esc(u.status)}</span><div class="cg-acts">${acts}</div></div>`;
+    const sub = u.status === 'approved' && !adm
+      ? (u.expiresAt ? ` · ${esc(PLAN_TXT[u.plan] || 'plan')} · ${live ? 'until ' + esc(fmtDate(u.expiresAt)) + ' (' + daysLeft(u.expiresAt) + ' days left)' : 'ended ' + esc(fmtDate(u.expiresAt))}` : ' · no plan set') : '';
+    return `<div class="cg-user"><div class="cg-uinfo"><b>${esc(u.name || u.email)}</b><span class="muted small">${esc(u.email)}${when(u) ? ' · joined ' + esc(when(u)) : ''}${sub}</span></div>
+      <span class="cg-chip ${over ? 'blocked' : esc(u.status)}">${adm ? 'admin' : over ? 'expired' : esc(u.status)}</span><div class="cg-acts">${acts}</div></div>`;
   }).join('') : '<p class="muted">No one has created an account yet.</p>';
 }
 function openUsers() {
-  modal('Users', '<div id="cgUsers" class="cg-users"></div><p class="muted small">New people appear here as “pending”. Approve them to let them in. A member can use one device at a time: signing in on a new device signs the old one out.</p>', d => {
+  modal('Users', '<div id="cgUsers" class="cg-users"></div><p class="muted small">New people appear here as “pending”. After you receive their payment, approve them for 6 months or 1 year. The time starts from the day you approve. Renewing early adds to the time they have left. A member can use one device at a time: signing in on a new device signs the old one out.</p>', d => {
     renderUsers();
     d.addEventListener('click', async e => {
       const b = e.target.closest('[data-a]'); if (!b) return;
       const id = b.dataset.u, a = b.dataset.a; b.disabled = true;
       try {
         if (a === 'delete') { if (confirm('Remove this user? They can create an account again, and it will wait for approval.')) await usersCol.doc(id).delete(); }
+        else if (a === 'grant') {
+          const u = usersList.find(x => x.id === id) || {}, plan = b.dataset.plan === '1y' ? '1y' : '6m';
+          const base = u.status === 'approved' && u.expiresAt > Date.now() ? u.expiresAt : Date.now();
+          await usersCol.doc(id).update({ status: 'approved', plan, expiresAt: addMonths(base, plan === '1y' ? 12 : 6), decidedAt: firebase.firestore.FieldValue.serverTimestamp() });
+        }
         else await usersCol.doc(id).update({ status: a, decidedAt: firebase.firestore.FieldValue.serverTimestamp() });
       } catch (x) { toast(fbMsg(x)); }
       b.disabled = false;

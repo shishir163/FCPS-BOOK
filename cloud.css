@@ -56,3 +56,6 @@
 /* keep the cloud button next to settings, on the right of the top bar */
 #cloudBtn { margin-left: auto; }
 #cloudBtn + #settingsBtn { margin-left: 0; }
+
+/* payment / contact note on the waiting and expired screens */
+.cg-pay { white-space: pre-line; text-align: left; width: 100%; padding: 10px 12px; border-radius: 10px; background: var(--surface2); font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
