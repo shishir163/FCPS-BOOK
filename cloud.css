@@ -1,0 +1,58 @@
+/* FCPS Book — cloud layer styles (login screen, account button, user list). Uses the app's theme colours. */
+
+#cloudGate { position: fixed; inset: 0; z-index: 2147483000; display: grid; place-items: center; padding: 20px; overflow: auto;
+  background: var(--bg); color: var(--ink); font-family: var(--font-ui); }
+#cloudGate[hidden] { display: none; }
+.cg-card { width: min(420px, 100%); background: var(--surface); border: 1px solid var(--line); border-radius: 18px; padding: 26px 22px 22px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, .14); display: flex; flex-direction: column; gap: 14px; }
+.cg-center { text-align: center; align-items: center; }
+.cg-brand { display: flex; align-items: center; gap: 10px; font-size: 20px; }
+.cg-center .cg-brand { justify-content: center; }
+.cg-mark { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 12px; background: var(--accent); font-size: 21px; }
+.cg-card h1 { font-size: 21px; line-height: 1.25; }
+.cg-sub { color: var(--muted); line-height: 1.5; }
+.cg-sub.small { font-size: 13.5px; }
+.cg-note { padding: 10px 12px; border-radius: 10px; font-size: 14px; line-height: 1.4;
+  background: color-mix(in srgb, #E0A100 16%, var(--surface)); border: 1px solid color-mix(in srgb, #E0A100 45%, var(--line)); }
+.cg-err { min-height: 1.2em; color: var(--danger); font-size: 14px; line-height: 1.35; }
+.cg-row { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+
+.cg-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; border-radius: 12px; background: var(--surface2); }
+.cg-tabs button { padding: 9px 8px; border: 0; border-radius: 9px; background: transparent; color: var(--muted); font: inherit; font-weight: 700; cursor: pointer; }
+.cg-tabs button.on { background: var(--surface); color: var(--ink); box-shadow: 0 1px 4px rgba(0, 0, 0, .12); }
+
+#cgForm { display: flex; flex-direction: column; gap: 12px; }
+#cgForm label { display: flex; flex-direction: column; gap: 5px; font-weight: 700; font-size: 14px; }
+#cgForm input { padding: 11px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); font: inherit; font-weight: 400; font-size: 16px; }
+#cgForm input:focus { outline: 2px solid var(--accent); outline-offset: 0; }
+.cg-card .btn.big { padding: 12px 16px; font-size: 16px; }
+.cg-link { align-self: center; border: 0; background: none; color: var(--accent); font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; padding: 4px; }
+.cg-link:hover { text-decoration: underline; }
+
+.cg-spin { width: 34px; height: 34px; border-radius: 50%; border: 4px solid var(--line); border-top-color: var(--accent); animation: cgspin .8s linear infinite; }
+@keyframes cgspin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .cg-spin { animation-duration: 2.4s; } }
+
+/* account button in the top bar */
+#cloudBtn { position: relative; }
+#cloudBtn .cdot { position: absolute; right: 5px; bottom: 5px; width: 9px; height: 9px; border-radius: 50%; background: #2FA36B; border: 2px solid var(--bar); }
+#cloudBtn[data-sync="cached"] .cdot, #cloudBtn[data-sync="offline"] .cdot { background: #E0A100; }
+#cloudBtn[data-sync="saving"] .cdot { background: #3B6FE0; }
+#cloudBtn[data-sync="idle"] .cdot { background: #8E8E99; }
+#cloudBtn .cbadge { position: absolute; top: 1px; right: 0; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 9px; background: #EF5B5B; color: #fff; font-size: 11px; font-weight: 700; line-height: 17px; text-align: center; }
+#cloudBtn .cbadge[hidden] { display: none; }
+
+/* users panel */
+.cg-users { display: flex; flex-direction: column; gap: 10px; }
+.cg-user { display: grid; grid-template-columns: 1fr auto; gap: 8px 10px; align-items: center; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.cg-uinfo { display: flex; flex-direction: column; min-width: 0; overflow-wrap: anywhere; }
+.cg-acts { grid-column: 1 / -1; display: flex; gap: 8px; flex-wrap: wrap; }
+.cg-acts:empty { display: none; }
+.cg-chip { padding: 3px 10px; border-radius: 999px; font-size: 12.5px; font-weight: 700; background: var(--surface2); color: var(--muted); }
+.cg-chip.pending { background: color-mix(in srgb, #E0A100 25%, var(--surface)); color: var(--ink); }
+.cg-chip.approved { background: color-mix(in srgb, #2FA36B 25%, var(--surface)); color: var(--ink); }
+.cg-chip.blocked { background: color-mix(in srgb, #EF5B5B 25%, var(--surface)); color: var(--ink); }
+
+/* keep the cloud button next to settings, on the right of the top bar */
+#cloudBtn { margin-left: auto; }
+#cloudBtn + #settingsBtn { margin-left: 0; }
